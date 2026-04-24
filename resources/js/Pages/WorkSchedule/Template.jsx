@@ -375,6 +375,7 @@ export default function WorkScheduleTemplate({
                                     data={employeeData}
                                     headers={employeeHeaders}
                                     frozenColumns={6}
+                                    stickyColumns={2}
                                     shiftMap={shiftMap}
                                     shiftOptions={shiftOptions}
                                     maxHeight="60vh"

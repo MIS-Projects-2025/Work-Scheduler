@@ -14,9 +14,10 @@ import { Combobox } from "@/components/ui/combobox";
 export default function ScheduleTableViewing({
     data = [],
     headers = [],
-    frozenColumns = 2,
+    nonEditableColumns = 6, // First 6 columns are not editable
+    stickyColumns = 2, // First 2 columns (Emp ID and Employee Name) are sticky
     shiftMap = {},
-    shiftOptions = [], // Array of shift options { value: "6A6P", label: "6A6P - AMS Day Shift" }
+    shiftOptions = [],
     maxHeight = "60vh",
     showHeader = true,
     className = "",
@@ -34,7 +35,7 @@ export default function ScheduleTableViewing({
     });
     const [selectedShift, setSelectedShift] = useState("");
 
-    // Calculate column widths based on content
+    // Calculate column widths based on content (in pixels)
     const getColumnWidth = (columnIndex) => {
         let maxLength = 0;
 
@@ -51,7 +52,17 @@ export default function ScheduleTableViewing({
             }
         });
 
-        return `${Math.min(Math.max(maxLength + 2, 8), 30)}ch`;
+        // Return width in pixels (8px per character, min 100px, max 250px)
+        return Math.min(Math.max(maxLength * 8, 100), 250);
+    };
+
+    // Calculate cumulative left position for sticky columns
+    const getStickyLeftPosition = (columnIndex) => {
+        let leftPosition = 0;
+        for (let i = 0; i < columnIndex; i++) {
+            leftPosition += getColumnWidth(i);
+        }
+        return leftPosition;
     };
 
     const getCellStyle = (cell) => {
@@ -70,9 +81,10 @@ export default function ScheduleTableViewing({
     };
 
     const handleCellDoubleClick = (rowIndex, colIndex, value) => {
-        const isFrozen = colIndex < frozenColumns;
+        const isNonEditable = colIndex < nonEditableColumns;
         const isHeaderRow = showHeader && rowIndex === 0;
-        if (editable && !isFrozen && !isHeaderRow) {
+        // Only allow editing if not in non-editable columns and not in header row
+        if (editable && !isNonEditable && !isHeaderRow) {
             setEditingCell({
                 open: true,
                 rowIndex,
@@ -113,7 +125,6 @@ export default function ScheduleTableViewing({
         setSelectedShift("");
     };
 
-    // Get the header name for the dialog
     const getHeaderName = () => {
         if (editingCell.colIndex !== null && headers[editingCell.colIndex]) {
             return headers[editingCell.colIndex];
@@ -121,10 +132,8 @@ export default function ScheduleTableViewing({
         return "Cell";
     };
 
-    // Preview the styling of the selected value
     const previewStyle = getCellStyle(selectedShift);
 
-    // Find the label for the selected shift
     const getSelectedShiftLabel = () => {
         const shift = shiftOptions.find((s) => s.value === selectedShift);
         return shift ? shift.label : selectedShift;
@@ -137,86 +146,120 @@ export default function ScheduleTableViewing({
                 className={`overflow-auto border rounded-lg ${className}`}
                 style={{ maxHeight }}
             >
-                <div style={{ position: "relative" }}>
-                    <table className="border-collapse text-sm w-full">
+                <table className="border-collapse text-sm min-w-max">
+                    <thead
+                        className="bg-gray-100"
+                        style={{
+                            position: "sticky",
+                            top: 0,
+                            zIndex: 40,
+                        }}
+                    >
                         {showHeader && headers.length > 0 && (
-                            <thead>
-                                <tr>
-                                    {headers.map((header, idx) => {
-                                        const isFrozen = idx < frozenColumns;
-                                        return (
-                                            <th
-                                                key={`header-${idx}`}
-                                                className={`border p-2 whitespace-nowrap bg-gray-100 font-bold ${
-                                                    isFrozen
-                                                        ? "sticky left-0 z-20"
-                                                        : ""
-                                                }`}
-                                                style={{
-                                                    backgroundColor: "#f3f4f6",
-                                                    ...(isFrozen && {
-                                                        boxShadow:
-                                                            "2px 0 5px -2px rgba(0,0,0,0.1)",
-                                                    }),
-                                                    minWidth:
-                                                        getColumnWidth(idx),
-                                                }}
-                                            >
-                                                {header}
-                                            </th>
-                                        );
-                                    })}
-                                </tr>
-                            </thead>
-                        )}
-                        <tbody>
-                            {data.map((row, rowIdx) => (
-                                <tr key={`row-${rowIdx}`}>
-                                    {row.map((cell, colIdx) => {
-                                        const isFrozen = colIdx < frozenColumns;
-                                        const cellStyle = getCellStyle(cell);
+                            <tr>
+                                {headers.map((header, idx) => {
+                                    const isSticky = idx < stickyColumns;
+                                    const width = getColumnWidth(idx);
+                                    const leftPosition = isSticky
+                                        ? getStickyLeftPosition(idx)
+                                        : 0;
 
-                                        return (
-                                            <td
-                                                key={`cell-${rowIdx}-${colIdx}`}
-                                                className={`border p-2 whitespace-nowrap ${
-                                                    editable && !isFrozen
-                                                        ? "cursor-pointer hover:bg-gray-50"
-                                                        : ""
-                                                } ${isFrozen ? "sticky left-0 z-10 bg-gray-50" : ""}`}
-                                                style={{
-                                                    ...cellStyle,
-                                                    ...(isFrozen && {
-                                                        boxShadow:
-                                                            "2px 0 5px -2px rgba(0,0,0,0.1)",
-                                                    }),
-                                                    minWidth:
-                                                        getColumnWidth(colIdx),
-                                                }}
-                                                onClick={() =>
-                                                    handleCellClick(
-                                                        rowIdx,
-                                                        colIdx,
-                                                        cell,
-                                                    )
-                                                }
-                                                onDoubleClick={() =>
-                                                    handleCellDoubleClick(
-                                                        rowIdx,
-                                                        colIdx,
-                                                        cell,
-                                                    )
-                                                }
-                                            >
-                                                {cell}
-                                            </td>
-                                        );
-                                    })}
-                                </tr>
-                            ))}
-                        </tbody>
-                    </table>
-                </div>
+                                    return (
+                                        <th
+                                            key={`header-${idx}`}
+                                            className="border p-2 whitespace-nowrap font-bold"
+                                            style={{
+                                                backgroundColor: "#f3f4f6",
+                                                width: `${width}px`,
+                                                minWidth: `${width}px`,
+                                                maxWidth: `${width}px`,
+                                                position: isSticky
+                                                    ? "sticky"
+                                                    : "relative",
+                                                left: isSticky
+                                                    ? `${leftPosition}px`
+                                                    : "auto",
+                                                zIndex: isSticky ? 30 : 20,
+                                                boxShadow: isSticky
+                                                    ? "2px 0 5px -2px rgba(0,0,0,0.1)"
+                                                    : "none",
+                                            }}
+                                        >
+                                            {header}
+                                        </th>
+                                    );
+                                })}
+                            </tr>
+                        )}
+                    </thead>
+                    <tbody>
+                        {data.map((row, rowIdx) => (
+                            <tr key={`row-${rowIdx}`}>
+                                {row.map((cell, colIdx) => {
+                                    const isSticky = colIdx < stickyColumns;
+                                    const isNonEditable =
+                                        colIdx < nonEditableColumns;
+                                    const cellStyle = getCellStyle(cell);
+                                    const width = getColumnWidth(colIdx);
+                                    const leftPosition = isSticky
+                                        ? getStickyLeftPosition(colIdx)
+                                        : 0;
+
+                                    return (
+                                        <td
+                                            key={`cell-${rowIdx}-${colIdx}`}
+                                            className={`border p-2 whitespace-nowrap ${
+                                                editable && !isNonEditable
+                                                    ? "cursor-pointer hover:bg-gray-50"
+                                                    : ""
+                                            }`}
+                                            style={{
+                                                ...cellStyle,
+                                                width: `${width}px`,
+                                                minWidth: `${width}px`,
+                                                maxWidth: `${width}px`,
+                                                position: isSticky
+                                                    ? "sticky"
+                                                    : "relative",
+                                                left: isSticky
+                                                    ? `${leftPosition}px`
+                                                    : "auto",
+                                                backgroundColor: isSticky
+                                                    ? "#fafbfc"
+                                                    : cellStyle.backgroundColor,
+                                                boxShadow: isSticky
+                                                    ? "2px 0 5px -2px rgba(0,0,0,0.1)"
+                                                    : "none",
+                                                zIndex: isSticky ? 10 : 1,
+                                            }}
+                                            onClick={() =>
+                                                handleCellClick(
+                                                    rowIdx,
+                                                    colIdx,
+                                                    cell,
+                                                )
+                                            }
+                                            onDoubleClick={() =>
+                                                handleCellDoubleClick(
+                                                    rowIdx,
+                                                    colIdx,
+                                                    cell,
+                                                )
+                                            }
+                                            title={
+                                                isNonEditable
+                                                    ? "This column is read-only"
+                                                    : "Double-click to edit"
+                                            }
+                                        >
+                                            {cell}
+                                        </td>
+                                    );
+                                })}
+                            </tr>
+                        ))}
+                    </tbody>
+                </table>
             </div>
 
             {/* Edit Dialog with Combobox */}
@@ -240,12 +283,11 @@ export default function ScheduleTableViewing({
                                 emptyMessage="No shift codes found."
                             />
                             <p className="text-xs text-muted-foreground">
-                                Double-click any cell to edit. Select from the
-                                dropdown to avoid typing errors.
+                                Double-click any editable cell to edit. First{" "}
+                                {nonEditableColumns} columns are read-only.
                             </p>
                         </div>
 
-                        {/* Preview of the selected value */}
                         {selectedShift && (
                             <div className="space-y-2">
                                 <Label>Preview</Label>
@@ -264,7 +306,6 @@ export default function ScheduleTableViewing({
                             </div>
                         )}
 
-                        {/* Show current value info */}
                         <div className="text-xs text-muted-foreground border-t pt-3">
                             <div>
                                 Current value:

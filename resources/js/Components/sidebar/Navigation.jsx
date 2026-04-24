@@ -15,7 +15,7 @@ export default function NavLinks({ isSidebarOpen }) {
             />
             <SidebarLink
                 href={route("workschedule.template.page")}
-                label="Work Schedule"
+                label="Create Work Schedule"
                 icon={<FileSpreadsheet className="w-5 h-5" />}
                 isSidebarOpen={isSidebarOpen}
             />
