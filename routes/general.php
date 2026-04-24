@@ -24,9 +24,7 @@ Route::prefix($app_name)->middleware(AuthMiddleware::class)->group(function () {
     Route::get("/workschedule/cutoff-days", [WorkScheduleController::class, 'getCutoffDays'])->name('workschedule.cutoffDays');
   });
 
-  Route::get("/workschedule/template", [WorkScheduleController::class, 'templatePage'])->name('workschedule.template.page');
-  Route::get("/workschedule/download", [WorkScheduleController::class, 'downloadTemplate'])->name('workschedule.template.download');
-  Route::get("/workschedule/view", [WorkScheduleController::class, 'viewSchedules'])->name('workschedule.view');
+
 
   Route::get("/", [DashboardController::class, 'index'])->name('dashboard');
   Route::get("/profile", [ProfileController::class, 'index'])->name('profile.index');

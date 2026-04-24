@@ -1,9 +1,20 @@
 import AuthenticatedLayout from "@/Layouts/AuthenticatedLayout";
 import { Head } from "@inertiajs/react";
-import { useMemo } from "react";
-import { FileSpreadsheet, Calendar, Clock, User } from "lucide-react";
+import { useMemo, useEffect, useCallback } from "react";
+import { router } from "@inertiajs/react";
+import {
+    FileSpreadsheet,
+    Calendar,
+    Clock,
+    User,
+    ChevronLeft,
+    ChevronRight,
+    ChevronsLeft,
+    ChevronsRight,
+} from "lucide-react";
 import ScheduleTableViewing from "./ScheduleTableViewing";
 import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader } from "@/components/ui/card";
 import { Separator } from "@/components/ui/separator";
 import { Table, TableBody, TableCell, TableRow } from "@/components/ui/table";
@@ -11,9 +22,45 @@ import { Table, TableBody, TableCell, TableRow } from "@/components/ui/table";
 export default function WorkScheduleView({
     groupedData = [],
     shiftCodes = [],
+    pagination = null,
     dateStart,
     dateEnd,
 }) {
+    const getPageFromHash = () => {
+        if (typeof window === "undefined") return 1;
+        const hash = window.location.hash;
+        const match = hash.match(/page=(\d+)/);
+        return match ? parseInt(match[1], 10) : (pagination?.currentPage || 1);
+    };
+
+    const goToPage = useCallback(
+        (page) => {
+            if (page < 1 || (pagination && page > pagination.lastPage)) return;
+
+            const params = new URLSearchParams(window.location.search);
+            params.set("page", page.toString());
+            const newHash = `#page=${page}`;
+            window.location.hash = newHash;
+
+            router.get(
+                `${window.location.pathname}?${params.toString()}`,
+                {},
+                {
+                    preserveState: true,
+                    preserveScroll: true,
+                },
+            );
+        },
+        [pagination],
+    );
+
+    useEffect(() => {
+        const page = getPageFromHash();
+        if (page !== (pagination?.currentPage || 1)) {
+            goToPage(page);
+        }
+    }, []);
+
     const shiftMap = useMemo(() => {
         const map = {};
         (shiftCodes || []).forEach((s) => {
@@ -39,6 +86,89 @@ export default function WorkScheduleView({
             })),
         [shiftCodes],
     );
+
+    const renderPagination = () => {
+        if (!pagination || pagination.total <= pagination.perPage) return null;
+
+        const { currentPage, lastPage, from, to, total } = pagination;
+
+        return (
+            <div className="flex items-center justify-between px-4 py-3 border-t bg-muted/30">
+                <div className="text-sm text-muted-foreground">
+                    Showing <span className="font-medium">{from}</span> to{" "}
+                    <span className="font-medium">{to}</span> of{" "}
+                    <span className="font-medium">{total}</span> results
+                </div>
+
+                <div className="flex items-center gap-2">
+                    <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={() => goToPage(1)}
+                        disabled={currentPage <= 1}
+                    >
+                        <ChevronsLeft className="w-4 h-4" />
+                    </Button>
+                    <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={() => goToPage(currentPage - 1)}
+                        disabled={currentPage <= 1}
+                    >
+                        <ChevronLeft className="w-4 h-4" />
+                    </Button>
+
+                    <div className="flex items-center gap-1">
+                        {Array.from({ length: Math.min(lastPage, 5) }).map((_, i) => {
+                            let pageNum;
+                            if (lastPage <= 5) {
+                                pageNum = i + 1;
+                            } else if (currentPage <= 3) {
+                                pageNum = i + 1;
+                            } else if (currentPage >= lastPage - 2) {
+                                pageNum = lastPage - 4 + i;
+                            } else {
+                                pageNum = currentPage - 2 + i;
+                            }
+
+                            return (
+                                <Button
+                                    key={pageNum}
+                                    variant={
+                                        currentPage === pageNum
+                                            ? "default"
+                                            : "outline"
+                                    }
+                                    size="sm"
+                                    onClick={() => goToPage(pageNum)}
+                                    className="w-8 h-8"
+                                >
+                                    {pageNum}
+                                </Button>
+                            );
+                        })}
+                    </div>
+
+                    <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={() => goToPage(currentPage + 1)}
+                        disabled={currentPage >= lastPage}
+                    >
+                        <ChevronRight className="w-4 h-4" />
+                    </Button>
+                    <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={() => goToPage(lastPage)}
+                        disabled={currentPage >= lastPage}
+                    >
+                        <ChevronsRight className="w-4 h-4" />
+                    </Button>
+                </div>
+            </div>
+        );
+    };
 
     const renderLegend = () => {
         if (!shiftCodes?.length) return null;
@@ -171,7 +301,7 @@ export default function WorkScheduleView({
                                             className="flex items-center gap-1"
                                         >
                                             <Clock className="w-3 h-3" />
-                                            {data.length} employees
+                                            {pagination ? `${pagination.from}-${pagination.to} of ${pagination.total}` : `${data.length} employees`}
                                         </Badge>
                                     </div>
                                 </CardHeader>
@@ -195,6 +325,8 @@ export default function WorkScheduleView({
                                         showHeader={true}
                                         editable={false}
                                     />
+
+                                    {renderPagination()}
                                 </CardContent>
                             </Card>
                         );

@@ -3,73 +3,94 @@
 namespace App\Http\Controllers;
 
 use App\Exports\WorkScheduleTemplateExport;
-use App\Models\PayrollCutoffSchedule;
-use App\Models\ShiftCode;
-use App\Models\WorkSchedule;
-use App\Models\WorkScheduleDay;
-use App\Services\HrisApiService;
+use App\Services\WorkScheduleService;
 use Maatwebsite\Excel\Facades\Excel;
 use Illuminate\Http\Request;
-use Illuminate\Support\Facades\DB;
 
 class WorkScheduleController extends Controller
 {
-    public function templatePage(Request $request)
+    public function __construct(
+        private readonly WorkScheduleService $service,
+    ) {}
+
+    // -------------------------------------------------------------------------
+    // Index — listing table with server-side pagination
+    // -------------------------------------------------------------------------
+
+    public function index(Request $request)
     {
-        $cutoffList = PayrollCutoffSchedule::orderBy('payroll_date_start', 'desc')
-            ->limit(24)
-            ->get()
-            ->toArray();
+        $empId       = session('emp_data.emp_id');
+        $empPosition = (int) session('emp_data.emp_position', 0);
 
-        $empId = session('emp_data.emp_id');
-        $hris = new HrisApiService();
-        $managerWorkDetails = $hris->fetchWorkDetails($empId);
-        $managerProdLine = $managerWorkDetails['prod_line'] ?? null;
+        // Decode hash parameter if present
+        $hash = $request->input('hash', '');
+        $filters = [];
 
-        $shifts = $this->getFilteredShiftCodes($managerProdLine);
+        if (!empty($hash)) {
+            try {
+                $decoded = base64_decode($hash);
+                $filters = json_decode($decoded, true) ?? [];
+            } catch (\Exception $e) {
+                $filters = [];
+            }
+        }
 
-        return inertia('WorkSchedule/Template', [
-            'cutoffList' => $cutoffList,
-            'shifts' => $shifts,
+        // Get filters from hash or use defaults
+        $status   = (int) ($filters['status'] ?? 0);
+        $search   = (string) ($filters['search'] ?? '');
+        $orderBy  = (string) ($filters['orderBy'] ?? 'payroll_date_start');
+        $orderDir = (string) ($filters['orderDir'] ?? 'desc');
+        $perPage  = (int) ($filters['perPage'] ?? 15);
+        $page     = (int) ($filters['page'] ?? 1);
+
+        // Get paginated data using Laravel's paginator
+        $data = $this->service->getIndexData(
+            $empId,
+            $empPosition,
+            $status,
+            $search,
+            $orderBy,
+            $orderDir,
+            $perPage,
+            $page,
+            withTabCounts: true
+        );
+
+        // Generate hash for current filters
+        $currentFilters = [
+            'status' => $status,
+            'search' => $search,
+            'orderBy' => $orderBy,
+            'orderDir' => $orderDir,
+            'perPage' => $perPage,
+            'page' => $page,
+        ];
+
+        $hash = base64_encode(json_encode($currentFilters));
+
+        return inertia('WorkSchedule/Index', [
+            'schedules' => $data['paginator'],
+            'tabCounts' => $data['tabCounts'],
+            'hash' => $hash,
+            'empPosition' => $empPosition,
         ]);
     }
 
-    private function getFilteredShiftCodes(?string $prodLine)
-    {
-        try {
-            if (!empty($prodLine)) {
-                if (strpos($prodLine, 'PL8') !== false) {
-                    return ShiftCode::where('shift_group', 'AMS')
-                        ->where('shift_code_status', 1)
-                        ->orderBy('shiftcode')
-                        ->get()
-                        ->toArray();
-                } elseif (strpos($prodLine, 'PL2') !== false) {
-                    return ShiftCode::where('shift_group', 'PL2/DEFAULT')
-                        ->where('shift_code_status', 1)
-                        ->orderBy('shiftcode')
-                        ->get()
-                        ->toArray();
-                } else {
-                    return ShiftCode::whereIn('shift_group', ['DEFAULT', 'PL2/DEFAULT'])
-                        ->where('shift_code_status', 1)
-                        ->orderBy('shiftcode')
-                        ->get()
-                        ->toArray();
-                }
-            }
+    // -------------------------------------------------------------------------
+    // Template page
+    // -------------------------------------------------------------------------
 
-            return ShiftCode::where('shift_code_status', 1)
-                ->orderBy('shiftcode')
-                ->get()
-                ->toArray();
-        } catch (\Exception $e) {
-            return ShiftCode::where('shift_code_status', 1)
-                ->orderBy('shiftcode')
-                ->get()
-                ->toArray();
-        }
+    public function templatePage(Request $request)
+    {
+        return inertia(
+            'WorkSchedule/Template',
+            $this->service->getTemplatePageData(session('emp_data.emp_id'))
+        );
     }
+
+    // -------------------------------------------------------------------------
+    // Download template Excel
+    // -------------------------------------------------------------------------
 
     public function downloadTemplate(Request $request)
     {
@@ -77,148 +98,60 @@ class WorkScheduleController extends Controller
             'cutoff_id' => 'required|integer|exists:payroll_cutoff_schedule,ID',
         ]);
 
-        $cutoffId = $request->input('cutoff_id');
-        $empId = session('emp_data.emp_id');
+        $ctx = $this->service->getDownloadContext(
+            session('emp_data.emp_id'),
+            (int) $request->input('cutoff_id')
+        );
 
-        $hris = new HrisApiService();
-        $directReports = $hris->fetchDirectReports($empId);
-        $employeeIds = array_column($directReports, 'emp_id');
-
-        // 👉 Get manager's work details to get their prodline for shift code filtering
-        $managerWorkDetails = $hris->fetchWorkDetails($empId);
-        $managerProdLine = $managerWorkDetails['prod_line'] ?? null;
-
-        // 👉 Get cutoff dates
-        $cutoff = PayrollCutoffSchedule::find($cutoffId);
-
-        $dateFrom = date('Ymd', strtotime($cutoff->payroll_date_start));
-        $dateTo = date('Ymd', strtotime($cutoff->payroll_date_end));
-
-        $extension = 'xlsx';
-
-        // ✅ FINAL FILENAME FORMAT
-        $filename = "schedule_template_{$dateFrom}_to_{$dateTo}_{$empId}.{$extension}";
-
-        $export = new WorkScheduleTemplateExport($cutoffId, $employeeIds, $managerProdLine);
-
-        return Excel::download($export, $filename);
+        return Excel::download(
+            new WorkScheduleTemplateExport($ctx['cutoffId'], $ctx['employeeIds'], $ctx['prodLine']),
+            $ctx['filename']
+        );
     }
+
+    // -------------------------------------------------------------------------
+    // View / detail
+    // -------------------------------------------------------------------------
+
+    public function viewSchedules(Request $request)
+    {
+        $request->validate([
+            'created_by' => 'required|string',
+            'date_start' => 'required|date',
+            'date_end'   => 'required|date',
+        ]);
+
+        return inertia('WorkSchedule/View', $this->service->getViewData(
+            session('emp_data.emp_id'),
+            $request->input('created_by'),
+            $request->input('date_start'),
+            $request->input('date_end'),
+        ));
+    }
+
+    // -------------------------------------------------------------------------
+    // Cutoff days helper
+    // -------------------------------------------------------------------------
+
     public function getCutoffDays(Request $request)
     {
-        $cutoffId = $request->query('cutoff_id');
-
-        if (!$cutoffId) {
+        if (!$cutoffId = $request->query('cutoff_id')) {
             return response()->json(['error' => 'cutoff_id required'], 400);
         }
 
-        $cutoff = PayrollCutoffSchedule::find($cutoffId);
-
+        $cutoff = \App\Models\PayrollCutoffSchedule::find($cutoffId);
         if (!$cutoff) {
             return response()->json(['error' => 'Cutoff not found'], 404);
         }
 
         $days = [];
-        $current = strtotime($cutoff->payroll_date_start);
-        $endTimestamp = strtotime($cutoff->payroll_date_end);
-
-        while ($current <= $endTimestamp) {
-            $days[] = date('Y-m-d', $current);
-            $current = strtotime('+1 day', $current);
+        $cur  = strtotime($cutoff->payroll_date_start);
+        $end  = strtotime($cutoff->payroll_date_end);
+        while ($cur <= $end) {
+            $days[] = date('Y-m-d', $cur);
+            $cur    = strtotime('+1 day', $cur);
         }
 
-        return response()->json([
-            'cutoff' => $cutoff,
-            'days' => $days,
-        ]);
-    }
-
-    public function viewSchedules(Request $request)
-    {
-        $empId = session('emp_data.emp_id');
-        $hris = new HrisApiService();
-        $managerWorkDetails = $hris->fetchWorkDetails($empId);
-        $managerProdLine = $managerWorkDetails['prod_line'] ?? null;
-
-        $dateStart = '2025-10-22';
-        $dateEnd = '2025-11-06';
-
-        $shiftCodes = $this->getFilteredShiftCodes($managerProdLine);
-
-        $schedules = WorkSchedule::where('payroll_date_start', $dateStart)
-            ->where('payroll_date_end', $dateEnd)
-            ->where('created_by', $empId)
-            ->with(['days.shiftCode'])
-            ->orderBy('emp_id')
-            ->get();
-
-        $employeeIds = $schedules->pluck('emp_id')->toArray();
-        $employees = $hris->fetchEmployeesBulk($employeeIds);
-
-        $workDetailsMap = [];
-        foreach ($employeeIds as $empId) {
-            $workDetailsMap[$empId] = $hris->fetchWorkDetails($empId);
-        }
-
-        $daysInPeriod = [];
-        $current = strtotime($dateStart);
-        $endTimestamp = strtotime($dateEnd);
-        while ($current <= $endTimestamp) {
-            $daysInPeriod[] = date('Y-m-d', $current);
-            $current = strtotime('+1 day', $current);
-        }
-
-        $staticHeaders = ['Emp ID', 'Employee Name', 'Department', 'Production Line', 'Team', 'Shift Type'];
-        $dayHeaders = [];
-        foreach ($daysInPeriod as $date) {
-            $dayObj = new \DateTime($date);
-            $dayHeaders[] = $dayObj->format('d-M') . ' ' . strtoupper(substr($dayObj->format('l'), 0, 3));
-        }
-
-        $headers = array_merge($staticHeaders, $dayHeaders);
-
-        $groupedData = [];
-
-        $schedulesData = $schedules->map(function ($schedule) use ($employees, $workDetailsMap, $daysInPeriod) {
-            $daysMap = [];
-            foreach ($schedule->days as $day) {
-                $scheduleCode = $day->shiftCode;
-                $codeValue = $scheduleCode ? $scheduleCode->shiftcode : '';
-                $daysMap[$day->work_date] = $codeValue;
-            }
-
-            $empData = $employees[$schedule->emp_id] ?? [];
-            $workData = $workDetailsMap[$schedule->emp_id] ?? [];
-
-            $row = [
-                $schedule->emp_id,
-                $empData['emp_name'] ?? '',
-                $empData['department'] ?? '',
-                $empData['prodline'] ?? '',
-                $workData['team'] ?? '',
-                $workData['shift_type'] ?? '',
-            ];
-
-            foreach ($daysInPeriod as $date) {
-                $row[] = $daysMap[$date] ?? '';
-            }
-
-            return $row;
-        })->values()->all();
-
-        $groupedData[] = [
-            'created_by' => $empId,
-            'payroll_date_start' => $dateStart,
-            'payroll_date_end' => $dateEnd,
-            'headers' => $headers,
-            'staticHeaders' => $staticHeaders,
-            'schedules' => $schedulesData,
-        ];
-
-        return inertia('WorkSchedule/View', [
-            'groupedData' => $groupedData,
-            'shiftCodes' => $shiftCodes,
-            'dateStart' => $dateStart,
-            'dateEnd' => $dateEnd,
-        ]);
+        return response()->json(['cutoff' => $cutoff, 'days' => $days]);
     }
 }
