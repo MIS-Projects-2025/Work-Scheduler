@@ -16,6 +16,7 @@ use PhpOffice\PhpSpreadsheet\Style\Alignment;
 use PhpOffice\PhpSpreadsheet\Style\Fill;
 use PhpOffice\PhpSpreadsheet\Style\Border;
 use PhpOffice\PhpSpreadsheet\Worksheet\Worksheet;
+use Illuminate\Support\Facades\Log;
 
 class WorkScheduleTemplateExport implements WithMultipleSheets
 {
@@ -24,12 +25,59 @@ class WorkScheduleTemplateExport implements WithMultipleSheets
     private int $cutoffId;
     private array $employeeIds;
     private HrisApiService $hris;
+    private ?string $managerProdLine;
+    private $filteredShiftCodes;
 
-    public function __construct(int $cutoffId, ?array $employeeIds = [])
+    public function __construct(int $cutoffId, ?array $employeeIds = [], ?string $managerProdLine = null)
     {
-        $this->cutoffId    = $cutoffId;
-        $this->employeeIds = $employeeIds ?? [];
-        $this->hris        = new HrisApiService();
+        $this->cutoffId        = $cutoffId;
+        $this->employeeIds     = $employeeIds ?? [];
+        $this->hris            = new HrisApiService();
+        $this->managerProdLine = $managerProdLine;
+        $this->filteredShiftCodes = $this->getFilteredShiftCodes();
+    }
+
+    /**
+     * Filter shift codes based on manager's production line
+     */
+    private function getFilteredShiftCodes()
+    {
+        try {
+            $prodLine = $this->managerProdLine;
+
+            if (!empty($prodLine)) {
+                if (strpos($prodLine, 'PL8') !== false) {
+                    // For PL8 lines → use AMS shifts
+                    return ShiftCode::where('shift_group', 'AMS')
+                        ->where('shift_code_status', 1)
+                        ->orderBy('shiftcode')
+                        ->get();
+                } elseif (strpos($prodLine, 'PL2') !== false) {
+                    // For PL2 lines → use PL2/DEFAULT shifts
+                    return ShiftCode::where('shift_group', 'PL2/DEFAULT')
+                        ->where('shift_code_status', 1)
+                        ->orderBy('shiftcode')
+                        ->get();
+                } else {
+                    // For other lines → include both DEFAULT and PL2/DEFAULT shifts
+                    return ShiftCode::whereIn('shift_group', ['DEFAULT', 'PL2/DEFAULT'])
+                        ->where('shift_code_status', 1)
+                        ->orderBy('shiftcode')
+                        ->get();
+                }
+            }
+
+            // Fallback: return all active shift codes
+            return ShiftCode::where('shift_code_status', 1)
+                ->orderBy('shiftcode')
+                ->get();
+        } catch (\Exception $e) {
+            Log::error("Shift codes filtering error: " . $e->getMessage());
+            // Fallback: return all active shift codes
+            return ShiftCode::where('shift_code_status', 1)
+                ->orderBy('shiftcode')
+                ->get();
+        }
     }
 
     public function sheets(): array
@@ -37,15 +85,18 @@ class WorkScheduleTemplateExport implements WithMultipleSheets
         $cutoff = PayrollCutoffSchedule::find($this->cutoffId)
             ?? PayrollCutoffSchedule::orderBy('ID', 'desc')->first();
 
-        $shiftCodes = ShiftCode::where('shift_code_status', 1)
-            ->orderBy('shiftcode')
-            ->get();
-
         $days = $this->getDaysBetween($cutoff->payroll_date_start, $cutoff->payroll_date_end);
 
         return [
-            new EmployeeListSheet($this->cutoffId, $this->employeeIds, $this->hris, $shiftCodes, $days),
-            new ShiftCodesReferenceSheet($shiftCodes),
+            new EmployeeListSheet(
+                $this->cutoffId,
+                $this->employeeIds,
+                $this->hris,
+                $this->filteredShiftCodes,
+                $days,
+                $this->managerProdLine
+            ),
+            new ShiftCodesReferenceSheet($this->filteredShiftCodes),
         ];
     }
 
@@ -72,16 +123,18 @@ class EmployeeListSheet implements FromCollection, ShouldAutoSize, WithEvents
     private HrisApiService $hris;
     private $shiftCodes;
     private array $days;
+    private ?string $managerProdLine;
 
     private const INFO_COLS = 6;
 
-    public function __construct(int $cutoffId, array $employeeIds, HrisApiService $hris, $shiftCodes, array $days)
+    public function __construct(int $cutoffId, array $employeeIds, HrisApiService $hris, $shiftCodes, array $days, ?string $managerProdLine = null)
     {
-        $this->cutoffId    = $cutoffId;
-        $this->employeeIds = $employeeIds;
-        $this->hris        = $hris;
-        $this->shiftCodes  = $shiftCodes;
-        $this->days        = $days;
+        $this->cutoffId        = $cutoffId;
+        $this->employeeIds     = $employeeIds;
+        $this->hris            = $hris;
+        $this->shiftCodes      = $shiftCodes;
+        $this->days            = $days;
+        $this->managerProdLine = $managerProdLine;
     }
 
     public function collection()

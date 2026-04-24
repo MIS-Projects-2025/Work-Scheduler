@@ -4,6 +4,7 @@ namespace App\Http\Controllers;
 
 use App\Exports\WorkScheduleTemplateExport;
 use App\Models\PayrollCutoffSchedule;
+use App\Models\ShiftCode;
 use App\Services\HrisApiService;
 use Maatwebsite\Excel\Facades\Excel;
 use Illuminate\Http\Request;
@@ -17,10 +18,56 @@ class WorkScheduleController extends Controller
             ->get()
             ->toArray();
 
+        $empId = session('emp_data.emp_id');
+        $hris = new HrisApiService();
+        $managerWorkDetails = $hris->fetchWorkDetails($empId);
+        $managerProdLine = $managerWorkDetails['prod_line'] ?? null;
+
+        $shifts = $this->getFilteredShiftCodes($managerProdLine);
+
         return inertia('WorkSchedule/Template', [
             'cutoffList' => $cutoffList,
+            'shifts' => $shifts,
         ]);
     }
+
+    private function getFilteredShiftCodes(?string $prodLine)
+    {
+        try {
+            if (!empty($prodLine)) {
+                if (strpos($prodLine, 'PL8') !== false) {
+                    return ShiftCode::where('shift_group', 'AMS')
+                        ->where('shift_code_status', 1)
+                        ->orderBy('shiftcode')
+                        ->get()
+                        ->toArray();
+                } elseif (strpos($prodLine, 'PL2') !== false) {
+                    return ShiftCode::where('shift_group', 'PL2/DEFAULT')
+                        ->where('shift_code_status', 1)
+                        ->orderBy('shiftcode')
+                        ->get()
+                        ->toArray();
+                } else {
+                    return ShiftCode::whereIn('shift_group', ['DEFAULT', 'PL2/DEFAULT'])
+                        ->where('shift_code_status', 1)
+                        ->orderBy('shiftcode')
+                        ->get()
+                        ->toArray();
+                }
+            }
+
+            return ShiftCode::where('shift_code_status', 1)
+                ->orderBy('shiftcode')
+                ->get()
+                ->toArray();
+        } catch (\Exception $e) {
+            return ShiftCode::where('shift_code_status', 1)
+                ->orderBy('shiftcode')
+                ->get()
+                ->toArray();
+        }
+    }
+
     public function downloadTemplate(Request $request)
     {
         $request->validate([
@@ -28,35 +75,31 @@ class WorkScheduleController extends Controller
         ]);
 
         $cutoffId = $request->input('cutoff_id');
-        $empId    = session('emp_data.emp_id');
+        $empId = session('emp_data.emp_id');
 
-        $hris          = new HrisApiService();
+        $hris = new HrisApiService();
         $directReports = $hris->fetchDirectReports($empId);
-        $employeeIds   = array_column($directReports, 'emp_id');
+        $employeeIds = array_column($directReports, 'emp_id');
+
+        // 👉 Get manager's work details to get their prodline for shift code filtering
+        $managerWorkDetails = $hris->fetchWorkDetails($empId);
+        $managerProdLine = $managerWorkDetails['prod_line'] ?? null;
 
         // 👉 Get cutoff dates
         $cutoff = PayrollCutoffSchedule::find($cutoffId);
 
         $dateFrom = date('Ymd', strtotime($cutoff->payroll_date_start));
-        $dateTo   = date('Ymd', strtotime($cutoff->payroll_date_end));
-
-        // 👉 Format emp part
-        $empPart = !empty($employeeIds)
-            ? implode('-', $employeeIds)
-            : 'ALL';
-
-
+        $dateTo = date('Ymd', strtotime($cutoff->payroll_date_end));
 
         $extension = 'xlsx';
 
         // ✅ FINAL FILENAME FORMAT
         $filename = "schedule_template_{$dateFrom}_to_{$dateTo}_{$empId}.{$extension}";
 
-        $export = new WorkScheduleTemplateExport($cutoffId, $employeeIds);
+        $export = new WorkScheduleTemplateExport($cutoffId, $employeeIds, $managerProdLine);
 
-        return \Maatwebsite\Excel\Facades\Excel::download($export, $filename);
+        return Excel::download($export, $filename);
     }
-
     public function getCutoffDays(Request $request)
     {
         $cutoffId = $request->query('cutoff_id');
