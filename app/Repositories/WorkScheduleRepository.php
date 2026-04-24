@@ -211,4 +211,15 @@ class WorkScheduleRepository
                 ->orWhere('approver2_id', $empId);
         })->where('work_sched_status', $status);
     }
+    public function getSchedulesByGroupQuery(
+        string $createdBy,
+        string $dateStart,
+        string $dateEnd
+    ): \Illuminate\Database\Eloquent\Builder {
+        return WorkSchedule::where('payroll_date_start', $dateStart)
+            ->where('payroll_date_end', $dateEnd)
+            ->where('created_by', $createdBy)
+            ->with(['days.shiftCode'])
+            ->orderBy('emp_id');
+    }
 }

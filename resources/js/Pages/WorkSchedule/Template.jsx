@@ -1,6 +1,6 @@
 import AuthenticatedLayout from "@/Layouts/AuthenticatedLayout";
 import { Head } from "@inertiajs/react";
-import { useState, useEffect, useMemo } from "react";
+import { useState, useEffect, useMemo, useCallback } from "react";
 import * as XLSX from "xlsx";
 
 import { Button } from "@/components/ui/button";
@@ -9,6 +9,12 @@ import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Separator } from "@/components/ui/separator";
 import { Table, TableBody, TableCell, TableRow } from "@/components/ui/table";
+import {
+    Tooltip,
+    TooltipContent,
+    TooltipProvider,
+    TooltipTrigger,
+} from "@/components/ui/tooltip";
 
 import {
     FileSpreadsheet,
@@ -18,6 +24,11 @@ import {
     Upload,
     Save,
     RotateCcw,
+    Maximize2,
+    Minimize2,
+    ArrowLeft,
+    ChevronDown,
+    ChevronUp,
 } from "lucide-react";
 import ScheduleTableViewing from "./ScheduleTableViewing";
 
@@ -26,9 +37,11 @@ export default function WorkScheduleTemplate({
     employees = [],
     shifts = [],
 }) {
+    const [isFullscreen, setIsFullscreen] = useState(false);
     const [selectedCutoff, setSelectedCutoff] = useState("");
     const [isLoading, setIsLoading] = useState(false);
     const [downloadComplete, setDownloadComplete] = useState(false);
+    const [legendCollapsed, setLegendCollapsed] = useState(false);
 
     const [file, setFile] = useState(null);
     const [employeeData, setEmployeeData] = useState([]);
@@ -36,8 +49,9 @@ export default function WorkScheduleTemplate({
     const [legendRows, setLegendRows] = useState([]);
     const [cutoffText, setCutoffText] = useState("");
     const [isSubmitting, setIsSubmitting] = useState(false);
+    const [editedCells, setEditedCells] = useState(new Set());
 
-    // Shift map
+    // Shift map with descriptions
     const shiftMap = useMemo(() => {
         const map = {};
         (shifts || []).forEach((s) => {
@@ -50,6 +64,7 @@ export default function WorkScheduleTemplate({
             map[s.shiftcode] = {
                 bg: bgColor || "#FFFFFF",
                 color: fontColor || "#000000",
+                desc: s.shiftcode_desc || "",
             };
         });
         return map;
@@ -77,6 +92,58 @@ export default function WorkScheduleTemplate({
         if (cutoffOptions.length > 0) setSelectedCutoff(cutoffOptions[0].value);
     }, [cutoffOptions]);
 
+    // Handle fullscreen toggle
+    const toggleFullscreen = useCallback(() => {
+        if (!isFullscreen) {
+            const elem = document.documentElement;
+            if (elem.requestFullscreen) {
+                elem.requestFullscreen();
+            } else if (elem.webkitRequestFullscreen) {
+                elem.webkitRequestFullscreen();
+            } else if (elem.msRequestFullscreen) {
+                elem.msRequestFullscreen();
+            }
+        } else {
+            if (document.exitFullscreen) {
+                document.exitFullscreen();
+            } else if (document.webkitExitFullscreen) {
+                document.webkitExitFullscreen();
+            } else if (document.msExitFullscreen) {
+                document.msExitFullscreen();
+            }
+        }
+        setIsFullscreen(!isFullscreen);
+    }, [isFullscreen]);
+
+    // Listen for fullscreen change events
+    useEffect(() => {
+        const handleFullscreenChange = () => {
+            setIsFullscreen(!!document.fullscreenElement);
+        };
+
+        document.addEventListener("fullscreenchange", handleFullscreenChange);
+        document.addEventListener(
+            "webkitfullscreenchange",
+            handleFullscreenChange,
+        );
+        document.addEventListener("msfullscreenchange", handleFullscreenChange);
+
+        return () => {
+            document.removeEventListener(
+                "fullscreenchange",
+                handleFullscreenChange,
+            );
+            document.removeEventListener(
+                "webkitfullscreenchange",
+                handleFullscreenChange,
+            );
+            document.removeEventListener(
+                "msfullscreenchange",
+                handleFullscreenChange,
+            );
+        };
+    }, []);
+
     // Download template
     const handleDownload = () => {
         if (!selectedCutoff) return;
@@ -98,6 +165,9 @@ export default function WorkScheduleTemplate({
     const parseFile = async (uploaded) => {
         if (!uploaded) return;
         setFile(uploaded);
+
+        // Clear edited cells when loading new file
+        setEditedCells(new Set());
 
         const buffer = await uploaded.arrayBuffer();
         const workbook = XLSX.read(buffer, { type: "array" });
@@ -144,6 +214,10 @@ export default function WorkScheduleTemplate({
     const handleFileChange = (e) => parseFile(e.target.files[0]);
 
     const handleCellEdit = (rowIndex, colIndex, newValue) => {
+        // Track that this cell was edited
+        const cellKey = `${rowIndex}-${colIndex}`;
+        setEditedCells((prev) => new Set([...prev, cellKey]));
+
         setEmployeeData((prev) => {
             const updated = prev.map((r) => [...r]);
             updated[rowIndex][colIndex] = newValue;
@@ -152,7 +226,12 @@ export default function WorkScheduleTemplate({
     };
 
     const handleReset = () => {
-        if (file) parseFile(file);
+        if (file) {
+            // Clear edited cells tracking
+            setEditedCells(new Set());
+            // Reload the file
+            parseFile(file);
+        }
     };
 
     const handleSubmit = async () => {
@@ -182,44 +261,121 @@ export default function WorkScheduleTemplate({
         }
     };
 
-    // Render legend from parsed Excel rows
+    // Render legend from parsed Excel rows with collapsible and tooltips
     const renderLegend = () => {
-        if (!legendRows.length) return null;
+        if (!shifts?.length) return null;
+
+        const codes = shifts.filter((s) => s.shiftcode);
+        const codesPerRow = 6;
+
+        if (legendCollapsed) {
+            return (
+                <div className="rounded-md border bg-muted/30 mb-4">
+                    <Button
+                        variant="ghost"
+                        size="sm"
+                        onClick={() => setLegendCollapsed(false)}
+                        className="w-full justify-between px-4 py-2 h-auto"
+                    >
+                        <span className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">
+                            Shift Code Legend ({codes.length} codes)
+                        </span>
+                        <ChevronDown className="w-4 h-4" />
+                    </Button>
+                </div>
+            );
+        }
+
         return (
             <div className="rounded-md border bg-muted/30 overflow-auto mb-4">
+                <div className="flex items-center justify-between px-4 py-2 border-b bg-muted/50">
+                    <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">
+                        Shift Code Legend ({codes.length} codes)
+                    </p>
+                    <Button
+                        variant="ghost"
+                        size="sm"
+                        onClick={() => setLegendCollapsed(true)}
+                        className="h-6 w-6 p-0"
+                    >
+                        <ChevronUp className="w-4 h-4" />
+                    </Button>
+                </div>
                 <Table>
                     <TableBody>
-                        {legendRows.map((row, rowIdx) => {
-                            if (!row?.length || row.every((c) => !c))
-                                return null;
+                        {Array.from({
+                            length: Math.ceil(codes.length / codesPerRow),
+                        }).map((_, rowIdx) => {
+                            const rowCodes = codes.slice(
+                                rowIdx * codesPerRow,
+                                (rowIdx + 1) * codesPerRow,
+                            );
                             return (
-                                <TableRow key={`legend-${rowIdx}`}>
-                                    {row.map((cell, colIdx) => {
-                                        if (!cell) return null;
-                                        const cellStr = String(cell).trim();
-                                        const style = shiftMap[cellStr];
-                                        const isCode =
-                                            /^[A-Z0-9]{3,8}$/i.test(cellStr) &&
-                                            !!style;
+                                <TableRow key={`legend-row-${rowIdx}`}>
+                                    {rowCodes.map((code, colIdx) => {
+                                        const style =
+                                            shiftMap[code.shiftcode] ?? {};
+                                        const description =
+                                            style?.desc ||
+                                            code.shiftcode_desc ||
+                                            "";
+
                                         return (
-                                            <TableCell
+                                            <TooltipProvider
                                                 key={`legend-${rowIdx}-${colIdx}`}
-                                                className="border p-2 text-sm"
-                                                style={
-                                                    isCode
-                                                        ? {
-                                                              backgroundColor:
-                                                                  style.bg,
-                                                              color: style.color,
-                                                              fontWeight: 600,
-                                                          }
-                                                        : {}
-                                                }
                                             >
-                                                {cell}
-                                            </TableCell>
+                                                <Tooltip>
+                                                    <TooltipTrigger asChild>
+                                                        <TableCell
+                                                            className="text-center p-2 font-semibold text-sm cursor-help"
+                                                            style={{
+                                                                backgroundColor:
+                                                                    style.bg ??
+                                                                    undefined,
+                                                                color:
+                                                                    style.color ??
+                                                                    undefined,
+                                                            }}
+                                                        >
+                                                            <div>
+                                                                {code.shiftcode}
+                                                            </div>
+                                                            <div className="text-xs font-normal opacity-75 mt-0.5">
+                                                                {description.length >
+                                                                30
+                                                                    ? description.substring(
+                                                                          0,
+                                                                          30,
+                                                                      ) + "..."
+                                                                    : description}
+                                                            </div>
+                                                        </TableCell>
+                                                    </TooltipTrigger>
+                                                    <TooltipContent
+                                                        side="top"
+                                                        className="max-w-xs"
+                                                    >
+                                                        <p className="text-xs">
+                                                            <span className="font-semibold">
+                                                                {code.shiftcode}
+                                                            </span>
+                                                            <br />
+                                                            {description}
+                                                        </p>
+                                                    </TooltipContent>
+                                                </Tooltip>
+                                            </TooltipProvider>
                                         );
                                     })}
+                                    {rowCodes.length < codesPerRow &&
+                                        Array.from({
+                                            length:
+                                                codesPerRow - rowCodes.length,
+                                        }).map((_, i) => (
+                                            <TableCell
+                                                key={`pad-${rowIdx}-${i}`}
+                                            />
+                                        ))}
                                 </TableRow>
                             );
                         })}
@@ -231,23 +387,59 @@ export default function WorkScheduleTemplate({
 
     const hasData = employeeData.length > 0;
 
-    return (
-        <AuthenticatedLayout>
-            <Head title="Work Schedule Template" />
-
-            <div className="p-6 space-y-6 bg-background min-h-screen">
-                {/* Header */}
-                <div>
-                    <h1 className="text-2xl font-bold flex items-center gap-2 text-foreground">
-                        <FileSpreadsheet className="w-6 h-6 text-primary" />
-                        Work Schedule Template
-                    </h1>
-                    <p className="text-muted-foreground mt-1">
-                        Download, upload, edit, and submit your work schedule
-                        Excel file.
-                    </p>
+    // Main content component
+    const MainContent = () => (
+        <div className={`${isFullscreen ? "bg-background min-h-screen" : ""}`}>
+            {/* Header */}
+            <div
+                className={`border-b bg-card ${isFullscreen ? "sticky top-0 z-50 px-6 py-4" : "px-6 py-4"}`}
+            >
+                <div className="flex items-center justify-between">
+                    <div>
+                        <h1 className="text-2xl font-bold flex items-center gap-2 text-foreground">
+                            <FileSpreadsheet className="w-6 h-6 text-primary" />
+                            Work Schedule Template
+                        </h1>
+                        <p className="text-muted-foreground mt-1">
+                            Download, upload, edit, and submit your work
+                            schedule Excel file.
+                        </p>
+                    </div>
+                    <div className="flex items-center gap-3">
+                        {!isFullscreen && (
+                            <Button
+                                variant="outline"
+                                size="sm"
+                                onClick={() => window.history.back()}
+                                className="gap-2"
+                            >
+                                <ArrowLeft className="w-4 h-4" />
+                                Back
+                            </Button>
+                        )}
+                        <Button
+                            variant="outline"
+                            size="sm"
+                            onClick={toggleFullscreen}
+                            className="gap-2"
+                        >
+                            {isFullscreen ? (
+                                <>
+                                    <Minimize2 className="w-4 h-4" />
+                                    Exit Fullscreen
+                                </>
+                            ) : (
+                                <>
+                                    <Maximize2 className="w-4 h-4" />
+                                    Full Screen
+                                </>
+                            )}
+                        </Button>
+                    </div>
                 </div>
+            </div>
 
+            <div className={`${isFullscreen ? "p-6" : "p-6"} space-y-6`}>
                 <Separator />
 
                 {/* Step 1 & 2 */}
@@ -358,7 +550,7 @@ export default function WorkScheduleTemplate({
                                     </div>
                                 )}
 
-                                {/* Legend */}
+                                {/* Legend - Collapsible with tooltips */}
                                 {renderLegend()}
 
                                 {/* Editable table */}
@@ -369,9 +561,14 @@ export default function WorkScheduleTemplate({
                                     stickyColumns={2}
                                     shiftMap={shiftMap}
                                     shiftOptions={shiftOptions}
-                                    maxHeight="60vh"
+                                    maxHeight={
+                                        isFullscreen
+                                            ? "calc(100vh - 400px)"
+                                            : "60vh"
+                                    }
                                     editable={true}
                                     onCellChange={handleCellEdit}
+                                    editedCells={editedCells}
                                 />
 
                                 {/* Actions */}
@@ -406,6 +603,19 @@ export default function WorkScheduleTemplate({
                     </CardContent>
                 </Card>
             </div>
+        </div>
+    );
+
+    // Return with or without layout based on fullscreen mode
+    return isFullscreen ? (
+        <>
+            <Head title="Work Schedule Template - Fullscreen" />
+            <MainContent />
+        </>
+    ) : (
+        <AuthenticatedLayout>
+            <Head title="Work Schedule Template" />
+            <MainContent />
         </AuthenticatedLayout>
     );
 }

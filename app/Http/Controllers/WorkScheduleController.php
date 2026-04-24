@@ -121,11 +121,18 @@ class WorkScheduleController extends Controller
             'date_end'   => 'required|date',
         ]);
 
+        $perPage = (int) $request->input('perPage', 20);
+        $page = (int) $request->input('page', 1);
+        $search = (string) $request->input('search', '');
+
         return inertia('WorkSchedule/View', $this->service->getViewData(
             session('emp_data.emp_id'),
             $request->input('created_by'),
             $request->input('date_start'),
             $request->input('date_end'),
+            $perPage,
+            $page,
+            $search
         ));
     }
 

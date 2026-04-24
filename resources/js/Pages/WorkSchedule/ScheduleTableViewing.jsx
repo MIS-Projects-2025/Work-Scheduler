@@ -1,4 +1,4 @@
-import { useRef, useState } from "react";
+import { useRef, useState, useEffect } from "react";
 import {
     Dialog,
     DialogContent,
@@ -11,17 +11,20 @@ import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
 import { Combobox } from "@/components/ui/combobox";
 import { Badge } from "@/components/ui/badge";
-// NOTE: We intentionally use plain <table> elements here instead of shadcn's
-// <Table> component. shadcn/Table renders an extra `overflow-auto` wrapper div
-// which creates a nested scroll context and breaks `position: sticky` on both
-// the thead (vertical) and frozen columns (horizontal) simultaneously.
+import {
+    Tooltip,
+    TooltipContent,
+    TooltipProvider,
+    TooltipTrigger,
+} from "@/components/ui/tooltip";
 import { cn } from "@/lib/utils";
 
 export default function ScheduleTableViewing({
     data = [],
     headers = [],
-    frozenColumns = 6, // alias kept for callers that use frozenColumns
-    nonEditableColumns, // preferred name; falls back to frozenColumns
+    subHeaders = [],
+    frozenColumns = 6,
+    nonEditableColumns,
     stickyColumns = 2,
     shiftMap = {},
     shiftOptions = [],
@@ -31,10 +34,9 @@ export default function ScheduleTableViewing({
     onCellClick = null,
     editable = false,
     onCellChange = null,
+    editedCells = new Set(), // Track edited cells: "rowIdx-colIdx"
 }) {
-    // Support both prop names
     const readonlyCols = nonEditableColumns ?? frozenColumns ?? 6;
-
     const tableContainerRef = useRef(null);
     const [editingCell, setEditingCell] = useState({
         open: false,
@@ -44,11 +46,24 @@ export default function ScheduleTableViewing({
         originalValue: "",
     });
     const [selectedShift, setSelectedShift] = useState("");
+    const [localEditedCells, setLocalEditedCells] = useState(editedCells);
+
+    const hasSubHeaders = subHeaders && subHeaders.length > 0;
+
+    // Count edited cells
+    const editedCount = localEditedCells.size;
 
     const getColumnWidth = (columnIndex) => {
         let maxLength = 0;
         if (headers[columnIndex] && typeof headers[columnIndex] === "string") {
             maxLength = Math.max(maxLength, headers[columnIndex].length);
+        }
+        if (
+            hasSubHeaders &&
+            subHeaders[columnIndex] &&
+            typeof subHeaders[columnIndex] === "string"
+        ) {
+            maxLength = Math.max(maxLength, subHeaders[columnIndex].length);
         }
         data.forEach((row) => {
             const cell = row[columnIndex];
@@ -74,6 +89,15 @@ export default function ScheduleTableViewing({
         };
     };
 
+    const getShiftDescription = (cell) => {
+        const style = shiftMap[cell];
+        return style?.desc || "";
+    };
+
+    const isCellEdited = (rowIndex, colIndex) => {
+        return localEditedCells.has(`${rowIndex}-${colIndex}`);
+    };
+
     const handleCellClick = (rowIndex, colIndex, value) => {
         onCellClick?.(rowIndex, colIndex, value);
     };
@@ -92,6 +116,10 @@ export default function ScheduleTableViewing({
 
     const handleSaveEdit = () => {
         if (onCellChange && editable && selectedShift !== undefined) {
+            // Track that this cell was edited
+            const cellKey = `${editingCell.rowIndex}-${editingCell.colIndex}`;
+            setLocalEditedCells((prev) => new Set([...prev, cellKey]));
+
             onCellChange(
                 editingCell.rowIndex,
                 editingCell.colIndex,
@@ -118,28 +146,60 @@ export default function ScheduleTableViewing({
             : "Cell";
 
     const previewStyle = getCellStyle(selectedShift);
-
     const getSelectedShiftLabel = () =>
         shiftOptions.find((s) => s.value === selectedShift)?.label ??
         selectedShift;
 
+    // Render cell content with tooltip if it's a shift code
+    const renderCellContent = (cell, isShiftCode, isEdited) => {
+        const content =
+            !isShiftCode || !cell ? (
+                cell
+            ) : (
+                <TooltipProvider key={`tooltip-${cell}`}>
+                    <Tooltip>
+                        <TooltipTrigger asChild>
+                            <span className="cursor-help block">{cell}</span>
+                        </TooltipTrigger>
+                        <TooltipContent side="top" className="max-w-xs">
+                            <p className="text-xs">
+                                <span className="font-semibold">{cell}</span>
+                                {getShiftDescription(cell) && (
+                                    <>
+                                        <br />
+                                        {getShiftDescription(cell)}
+                                    </>
+                                )}
+                            </p>
+                        </TooltipContent>
+                    </Tooltip>
+                </TooltipProvider>
+            );
+
+        return (
+            <div className="relative">
+                {content}
+                {isEdited && (
+                    <div className="absolute top-0 right-0 w-2 h-2 bg-yellow-500 rounded-full animate-pulse" />
+                )}
+            </div>
+        );
+    };
+
     return (
         <>
-            {/*
-             * Single scroll container — overflow:auto on both axes.
-             * We use a plain <table> (not shadcn <Table>) because shadcn wraps
-             * it in an extra overflow-auto <div>, which creates a nested scroll
-             * context. Once a scroll context is nested, the browser refuses to
-             * let a child cell be sticky relative to the *outer* viewport, so
-             * both `top:0` (vertical freeze) and `left:Xpx` (horizontal freeze)
-             * stop working at the same time.
-             *
-             * z-index layers:
-             *   50 — corner <th>  (sticky top AND sticky left — must win over both axes)
-             *   20 — non-corner <th>  (sticky top only, scrolls with horizontal)
-             *   10 — frozen body <td>  (sticky left only, scrolls with vertical)
-             *    1 — normal body <td>
-             */}
+            {/* Edit Count Badge */}
+            {editable && editedCount > 0 && (
+                <div className="mb-3 flex justify-end">
+                    <Badge variant="warning" className="gap-1">
+                        <span className="text-xs">{editedCount}</span>
+                        <span className="text-xs">
+                            cell{editedCount !== 1 ? "s" : ""} edited
+                        </span>
+                    </Badge>
+                </div>
+            )}
+
             <div
                 ref={tableContainerRef}
                 className={cn("rounded-md border overflow-auto", className)}
@@ -151,6 +211,7 @@ export default function ScheduleTableViewing({
                 >
                     {showHeader && headers.length > 0 && (
                         <thead>
+                            {/* FIRST ROW */}
                             <tr>
                                 {headers.map((header, idx) => {
                                     const isColSticky = idx < stickyColumns;
@@ -183,6 +244,48 @@ export default function ScheduleTableViewing({
                                     );
                                 })}
                             </tr>
+
+                            {/* SECOND ROW - Day Names */}
+                            {hasSubHeaders && (
+                                <tr>
+                                    {subHeaders.map((subHeader, idx) => {
+                                        const isColSticky = idx < stickyColumns;
+                                        const width = getColumnWidth(idx);
+                                        const left = isColSticky
+                                            ? getStickyLeftPosition(idx)
+                                            : undefined;
+                                        const topPosition = 45;
+
+                                        return (
+                                            <th
+                                                key={`subheader-${idx}`}
+                                                className="whitespace-nowrap font-medium text-center px-4 py-1 text-xs text-muted-foreground bg-muted/80 border-b border-border"
+                                                style={{
+                                                    position: "sticky",
+                                                    top: topPosition,
+                                                    ...(isColSticky
+                                                        ? { left }
+                                                        : {}),
+                                                    width,
+                                                    minWidth: width,
+                                                    maxWidth: width,
+                                                    zIndex: isColSticky
+                                                        ? 49
+                                                        : 19,
+                                                    boxShadow:
+                                                        isColSticky &&
+                                                        idx ===
+                                                            stickyColumns - 1
+                                                            ? "2px 0 4px -2px hsl(var(--border))"
+                                                            : undefined,
+                                                }}
+                                            >
+                                                {subHeader}
+                                            </th>
+                                        );
+                                    })}
+                                </tr>
+                            )}
                         </thead>
                     )}
                     <tbody>
@@ -194,6 +297,10 @@ export default function ScheduleTableViewing({
                                 {row.map((cell, colIdx) => {
                                     const isColSticky = colIdx < stickyColumns;
                                     const isReadonly = colIdx < readonlyCols;
+                                    const isShiftCode =
+                                        colIdx >= readonlyCols &&
+                                        cell &&
+                                        shiftMap[cell];
                                     const cellStyle = getCellStyle(cell);
                                     const hasStyle =
                                         cellStyle.backgroundColor !== null;
@@ -201,18 +308,21 @@ export default function ScheduleTableViewing({
                                     const left = isColSticky
                                         ? getStickyLeftPosition(colIdx)
                                         : undefined;
+                                    const edited = isCellEdited(rowIdx, colIdx);
 
                                     return (
                                         <td
                                             key={`cell-${rowIdx}-${colIdx}`}
                                             className={cn(
-                                                "whitespace-nowrap px-4 py-2",
+                                                "whitespace-nowrap px-4 py-2 relative",
                                                 editable &&
                                                     !isReadonly &&
                                                     "cursor-pointer hover:outline hover:outline-2 hover:outline-ring hover:outline-offset-[-2px]",
+                                                isShiftCode && "cursor-help",
+                                                edited &&
+                                                    "bg-yellow-50 dark:bg-yellow-950/20",
                                             )}
                                             style={{
-                                                // Shift colours only on non-frozen body cells
                                                 ...(hasStyle && !isColSticky
                                                     ? {
                                                           backgroundColor:
@@ -222,14 +332,15 @@ export default function ScheduleTableViewing({
                                                               cellStyle.fontWeight,
                                                       }
                                                     : {}),
-                                                // Frozen column body cells
                                                 ...(isColSticky
                                                     ? {
                                                           position: "sticky",
                                                           left,
                                                           zIndex: 10,
                                                           backgroundColor:
-                                                              "hsl(var(--background))",
+                                                              edited
+                                                                  ? "rgba(234, 179, 8, 0.1)"
+                                                                  : "hsl(var(--background))",
                                                           boxShadow:
                                                               "2px 0 4px -2px hsl(var(--border))",
                                                       }
@@ -260,10 +371,21 @@ export default function ScheduleTableViewing({
                                                     ? "Read-only column"
                                                     : editable
                                                       ? "Double-click to edit"
-                                                      : undefined
+                                                      : isShiftCode
+                                                        ? getShiftDescription(
+                                                              cell,
+                                                          )
+                                                        : undefined
                                             }
                                         >
-                                            {cell}
+                                            {renderCellContent(
+                                                cell,
+                                                isShiftCode,
+                                                edited,
+                                            )}
+                                            {edited && !isColSticky && (
+                                                <div className="absolute top-0 right-0 w-2 h-2 bg-yellow-500 rounded-full animate-pulse" />
+                                            )}
                                         </td>
                                     );
                                 })}

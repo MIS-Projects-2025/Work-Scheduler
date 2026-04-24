@@ -58,11 +58,6 @@ class WorkScheduleService
     // Index / listing page with server-side pagination
     // -------------------------------------------------------------------------
 
-    /**
-     * Get paginated data for the index page.
-     * 
-     * @param bool $withTabCounts Pass true only on the initial full-page load
-     */
     public function getIndexData(
         string $empId,
         int    $empPosition,
@@ -74,7 +69,6 @@ class WorkScheduleService
         int    $page,
         bool   $withTabCounts = false
     ): array {
-        // Get paginator from repository
         $paginator = $this->repo->getPaginatedGroups(
             $empId,
             $status,
@@ -86,10 +80,7 @@ class WorkScheduleService
             $page
         );
 
-        // Transform the items to add created_by_name and status_label
-        // Convert Eloquent models to arrays and enrich them
         $enrichedItems = collect($paginator->items())->map(function ($item) {
-            // Convert model to array if it's an Eloquent model
             $row = $item instanceof \Illuminate\Database\Eloquent\Model ? $item->toArray() : (array) $item;
 
             return array_merge($row, [
@@ -98,7 +89,6 @@ class WorkScheduleService
             ]);
         });
 
-        // Create a new paginator instance with enriched items
         $enrichedPaginator = new LengthAwarePaginator(
             $enrichedItems,
             $paginator->total(),
@@ -112,7 +102,6 @@ class WorkScheduleService
             'tabCounts' => [],
         ];
 
-        // Only run the 5 COUNT queries when the full page is being rendered
         if ($withTabCounts) {
             $result['tabCounts'] = $this->repo->countAllStatuses($empId, $empPosition);
         }
@@ -120,9 +109,6 @@ class WorkScheduleService
         return $result;
     }
 
-    /**
-     * Get creator name with caching to avoid repeated API calls
-     */
     private function getCreatorName(string $creatorId): string
     {
         if (!isset($this->nameCache[$creatorId])) {
@@ -135,47 +121,82 @@ class WorkScheduleService
     // -------------------------------------------------------------------------
     // View / detail page
     // -------------------------------------------------------------------------
-
     public function getViewData(
         string $managerEmpId,
         string $createdBy,
         string $dateStart,
-        string $dateEnd
+        string $dateEnd,
+        int $perPage = 20,
+        int $page = 1,
+        string $search = ''
     ): array {
         $shiftCodes = $this->getShiftCodesForManager($managerEmpId);
-        $schedules  = $this->repo->getSchedulesByGroup($createdBy, $dateStart, $dateEnd);
 
-        $employeeIds    = $schedules->pluck('emp_id')->toArray();
-        $employees      = $this->hris->fetchEmployeesBulk($employeeIds);
+        // Get paginated schedules
+        $schedulesQuery = $this->repo->getSchedulesByGroupQuery($createdBy, $dateStart, $dateEnd);
+
+        // Apply search filter if needed
+        if (!empty($search)) {
+            $schedulesQuery->where(function ($q) use ($search) {
+                $q->where('emp_id', 'like', "%{$search}%")
+                    ->orWhereHas('employee', function ($q2) use ($search) {
+                        $q2->where('emp_name', 'like', "%{$search}%");
+                    });
+            });
+        }
+
+        // Paginate
+        $paginatedSchedules = $schedulesQuery->paginate($perPage, ['*'], 'page', $page);
+
+        // Get all employee IDs from paginated results
+        $employeeIds = $paginatedSchedules->pluck('emp_id')->toArray();
+        $employees = $this->hris->fetchEmployeesBulk($employeeIds);
+
         $workDetailsMap = [];
         foreach ($employeeIds as $id) {
             $workDetailsMap[$id] = $this->hris->fetchWorkDetails($id);
         }
 
-        $daysInPeriod  = $this->buildDateRange($dateStart, $dateEnd);
+        $daysInPeriod = $this->buildDateRange($dateStart, $dateEnd);
         $staticHeaders = ['Emp ID', 'Employee Name', 'Department', 'Production Line', 'Team', 'Shift Type'];
-        $dayHeaders    = array_map(function (string $date) {
-            $d = new \DateTime($date);
-            return $d->format('d-M') . ' ' . strtoupper(substr($d->format('l'), 0, 3));
+
+        // First row: dates (15-Jan, 16-Jan, etc.)
+        $dateHeaders = array_map(function (string $date) {
+            $dayObj = new \DateTime($date);
+            return $dayObj->format('d-M');
         }, $daysInPeriod);
 
-        $headers = array_merge($staticHeaders, $dayHeaders);
+        // Second row: day names (MON, TUE, WED, etc.)
+        $dayHeaders = array_map(function (string $date) {
+            $dayObj = new \DateTime($date);
+            return strtoupper(substr($dayObj->format('l'), 0, 3));
+        }, $daysInPeriod);
 
-        $rows = $schedules->map(function ($schedule) use ($employees, $workDetailsMap, $daysInPeriod) {
+        // Combine static headers with date headers for the first row
+        $firstRowHeaders = array_merge($staticHeaders, $dateHeaders);
+
+        // Create second row with empty strings for static columns, then day names
+        $secondRowHeaders = array_merge(
+            array_fill(0, count($staticHeaders), ''),
+            $dayHeaders
+        );
+
+        // Build rows from paginated data
+        $rows = collect($paginatedSchedules->items())->map(function ($schedule) use ($employees, $workDetailsMap, $daysInPeriod) {
             $daysMap = [];
             foreach ($schedule->days as $day) {
                 $daysMap[$day->work_date] = $day->shiftCode?->shiftcode ?? '';
             }
 
-            $empData  = $employees[$schedule->emp_id] ?? [];
+            $empData = $employees[$schedule->emp_id] ?? [];
             $workData = $workDetailsMap[$schedule->emp_id] ?? [];
 
             $row = [
                 $schedule->emp_id,
-                $empData['emp_name']    ?? '',
-                $empData['department']  ?? '',
-                $empData['prodline']    ?? '',
-                $workData['team']       ?? '',
+                $empData['emp_name'] ?? '',
+                $empData['department'] ?? '',
+                $empData['prodline'] ?? '',
+                $workData['team'] ?? '',
                 $workData['shift_type'] ?? '',
             ];
 
@@ -186,21 +207,38 @@ class WorkScheduleService
             return $row;
         })->values()->all();
 
+        // Prepare pagination meta
+        $paginationMeta = [
+            'currentPage' => $paginatedSchedules->currentPage(),
+            'lastPage' => $paginatedSchedules->lastPage(),
+            'perPage' => $paginatedSchedules->perPage(),
+            'total' => $paginatedSchedules->total(),
+            'from' => $paginatedSchedules->firstItem(),
+            'to' => $paginatedSchedules->lastItem(),
+        ];
+
         return [
             'groupedData' => [[
-                'created_by'         => $createdBy,
+                'created_by' => $createdBy,
                 'payroll_date_start' => $dateStart,
-                'payroll_date_end'   => $dateEnd,
-                'headers'            => $headers,
-                'staticHeaders'      => $staticHeaders,
-                'schedules'          => $rows,
+                'payroll_date_end' => $dateEnd,
+                'headers' => $firstRowHeaders,
+                'subHeaders' => $secondRowHeaders,
+                'staticHeaders' => $staticHeaders,
+                'dateHeaders' => $dateHeaders,
+                'dayHeaders' => $dayHeaders,
+                'schedules' => $rows,
             ]],
-            'shiftCodes'  => $shiftCodes,
-            'dateStart'   => $dateStart,
-            'dateEnd'     => $dateEnd,
+            'shiftCodes' => $shiftCodes,
+            'dateStart' => $dateStart,
+            'dateEnd' => $dateEnd,
+            'pagination' => $paginationMeta,
+            'filters' => [
+                'search' => $search,
+                'perPage' => $perPage,
+            ],
         ];
     }
-
     // -------------------------------------------------------------------------
     // Helpers
     // -------------------------------------------------------------------------
