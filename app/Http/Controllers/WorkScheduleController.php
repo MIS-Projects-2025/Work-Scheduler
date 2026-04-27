@@ -42,7 +42,7 @@ class WorkScheduleController extends Controller
         $search   = (string) ($filters['search'] ?? '');
         $orderBy  = (string) ($filters['orderBy'] ?? 'payroll_date_start');
         $orderDir = (string) ($filters['orderDir'] ?? 'desc');
-        $perPage  = (int) ($filters['perPage'] ?? 15);
+        $perPage  = (int) ($filters['perPage'] ?? 10);
         $page     = (int) ($filters['page'] ?? 1);
 
         // Get paginated data using Laravel's paginator
@@ -71,10 +71,18 @@ class WorkScheduleController extends Controller
         $hash = base64_encode(json_encode($currentFilters));
 
         return inertia('WorkSchedule/Index', [
-            'schedules' => $data['paginator'],
-            'tabCounts' => $data['tabCounts'],
-            'hash' => $hash,
+            'schedules'   => $data['paginator'],
+            'tabCounts'   => $data['tabCounts'],
+            'hash'        => $hash,
             'empPosition' => $empPosition,
+            'filters'     => [
+                'status'   => $status,
+                'search'   => $search,
+                'orderBy'  => $orderBy,
+                'orderDir' => $orderDir,
+                'perPage'  => $perPage,
+                'page'     => $page,
+            ],
         ]);
     }
 
