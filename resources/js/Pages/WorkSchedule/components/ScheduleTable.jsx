@@ -49,7 +49,10 @@ function buildColumns(onView) {
             headerClassName: "text-center",
             className: "text-center",
             render: (row) => {
-                const s = SCHEDULE_STATUS[row.work_sched_status] ?? { label: "Unknown", variant: "secondary" };
+                const s = SCHEDULE_STATUS[row.work_sched_status] ?? {
+                    label: "Unknown",
+                    variant: "secondary",
+                };
                 return <Badge variant={s.variant}>{s.label}</Badge>;
             },
         },
@@ -57,11 +60,7 @@ function buildColumns(onView) {
             key: "actions",
             label: "Actions",
             render: (row) => (
-                <Button
-                    variant="ghost"
-                    size="sm"
-                    onClick={() => onView(row)}
-                >
+                <Button size="sm" variant="outline" onClick={() => onView(row)}>
                     <Eye className="w-4 h-4 mr-1" />
                     View
                 </Button>

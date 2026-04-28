@@ -7,44 +7,17 @@ import {
     User,
     Calendar,
     Clock,
-    CheckCheck,
     Maximize2,
     Minimize2,
-    Loader2,
 } from "lucide-react";
-import BulkActionBar from "./BulkActionBar";
 import { SCHEDULE_STATUS } from "../helpers/scheduleHelpers";
 
-/**
- * Sticky header bar for the Work Schedule View page.
- *
- * Props:
- *   isFullscreen        boolean
- *   createdBy           string
- *   formattedDateRange  string
- *   totalEmployees      number
- *   canAcknowledge      boolean
- *   acknowledging       boolean
- *   onAcknowledge       () => void
- *   canApprove          boolean
- *   selectedRows        Set
- *   bulkProcessing      boolean
- *   onBulkAction        (action: 'approve'|'disapprove') => void
- *   onToggleFullscreen  () => void
- */
 export default function ViewHeader({
     isFullscreen,
     createdBy,
     formattedDateRange,
     totalEmployees,
     status,
-    canAcknowledge,
-    acknowledging,
-    onAcknowledge,
-    canApprove,
-    selectedRows,
-    bulkProcessing,
-    onBulkAction,
     onToggleFullscreen,
 }) {
     const statusInfo = SCHEDULE_STATUS[status] ?? null;
@@ -98,38 +71,8 @@ export default function ViewHeader({
                     </div>
                 </div>
 
-                {/* Right — action buttons */}
+                {/* Right — fullscreen toggle */}
                 <div className="flex items-center gap-2 shrink-0">
-                    {canAcknowledge && (
-                        <Button
-                            size="sm"
-                            onClick={onAcknowledge}
-                            disabled={acknowledging}
-                            className="gap-2 bg-green-600 hover:bg-green-700 text-white"
-                        >
-                            {acknowledging ? (
-                                <>
-                                    <Loader2 className="w-4 h-4 animate-spin" />
-                                    Acknowledging...
-                                </>
-                            ) : (
-                                <>
-                                    <CheckCheck className="w-4 h-4" />
-                                    Acknowledge
-                                </>
-                            )}
-                        </Button>
-                    )}
-
-                    {canApprove && (
-                        <BulkActionBar
-                            selectedCount={selectedRows.size}
-                            processing={bulkProcessing}
-                            onApprove={() => onBulkAction("approve")}
-                            onDisapprove={() => onBulkAction("disapprove")}
-                        />
-                    )}
-
                     <Button
                         variant="outline"
                         size="sm"

@@ -1,9 +1,11 @@
 import AuthenticatedLayout from "@/Layouts/AuthenticatedLayout";
 import { Head } from "@inertiajs/react";
 import dayjs from "dayjs";
-import { Loader2, Search } from "lucide-react";
+import { Loader2, Search, CheckCheck } from "lucide-react";
 import { Card, CardContent } from "@/components/ui/card";
+import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import BulkActionBar from "./components/BulkActionBar";
 import {
     Select,
     SelectContent,
@@ -85,13 +87,6 @@ export default function WorkScheduleView({
                 formattedDateRange={formattedDateRange}
                 totalEmployees={totalEmployees}
                 status={status}
-                canAcknowledge={canAcknowledge}
-                acknowledging={acknowledging}
-                onAcknowledge={handleAcknowledge}
-                canApprove={canApprove}
-                selectedRows={selectedRows}
-                bulkProcessing={bulkProcessing}
-                onBulkAction={openBulkAction}
                 onToggleFullscreen={toggleFullscreen}
             />
 
@@ -116,40 +111,75 @@ export default function WorkScheduleView({
                             />
                         </CardContent>
 
-                        {/* Search + per-page controls */}
-                        <div className="px-4 pb-2 flex items-center justify-end gap-3 border-b">
-                            <div className="relative w-64">
-                                <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
-                                <Input
-                                    placeholder="Search by ID or name..."
-                                    value={search}
-                                    onChange={(e) => setSearch(e.target.value)}
-                                    className="pl-8 h-8 text-sm"
-                                />
+                        {/* Action buttons + Search + per-page controls */}
+                        <div className="px-4 py-2 flex items-center justify-between gap-3 border-b flex-wrap">
+                            {/* Left: acknowledge / bulk approve-disapprove */}
+                            <div className="flex items-center gap-2">
+                                {canAcknowledge && (
+                                    <Button
+                                        size="sm"
+                                        onClick={handleAcknowledge}
+                                        disabled={acknowledging}
+                                        className="gap-2 bg-green-600 hover:bg-green-700 text-white"
+                                    >
+                                        {acknowledging ? (
+                                            <>
+                                                <Loader2 className="w-4 h-4 animate-spin" />
+                                                Acknowledging...
+                                            </>
+                                        ) : (
+                                            <>
+                                                <CheckCheck className="w-4 h-4" />
+                                                Acknowledge
+                                            </>
+                                        )}
+                                    </Button>
+                                )}
+                                {canApprove && (
+                                    <BulkActionBar
+                                        selectedCount={selectedRows.size}
+                                        processing={bulkProcessing}
+                                        onApprove={() => openBulkAction("approve")}
+                                        onDisapprove={() => openBulkAction("disapprove")}
+                                    />
+                                )}
                             </div>
-                            <div className="flex items-center gap-2 text-sm text-muted-foreground">
-                                <span>Show</span>
-                                <Select
-                                    value={String(perPage)}
-                                    onValueChange={(v) =>
-                                        setPerPage(Number(v))
-                                    }
-                                >
-                                    <SelectTrigger className="w-20 h-8">
-                                        <SelectValue />
-                                    </SelectTrigger>
-                                    <SelectContent>
-                                        {PAGE_SIZES.map((n) => (
-                                            <SelectItem
-                                                key={n}
-                                                value={String(n)}
-                                            >
-                                                {n}
-                                            </SelectItem>
-                                        ))}
-                                    </SelectContent>
-                                </Select>
-                                <span>entries</span>
+
+                            {/* Right: search + per-page */}
+                            <div className="flex items-center gap-3">
+                                <div className="relative w-64">
+                                    <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
+                                    <Input
+                                        placeholder="Search by ID or name..."
+                                        value={search}
+                                        onChange={(e) => setSearch(e.target.value)}
+                                        className="pl-8 h-8 text-sm"
+                                    />
+                                </div>
+                                <div className="flex items-center gap-2 text-sm text-muted-foreground">
+                                    <span>Show</span>
+                                    <Select
+                                        value={String(perPage)}
+                                        onValueChange={(v) =>
+                                            setPerPage(Number(v))
+                                        }
+                                    >
+                                        <SelectTrigger className="w-20 h-8">
+                                            <SelectValue />
+                                        </SelectTrigger>
+                                        <SelectContent>
+                                            {PAGE_SIZES.map((n) => (
+                                                <SelectItem
+                                                    key={n}
+                                                    value={String(n)}
+                                                >
+                                                    {n}
+                                                </SelectItem>
+                                            ))}
+                                        </SelectContent>
+                                    </Select>
+                                    <span>entries</span>
+                                </div>
                             </div>
                         </div>
 

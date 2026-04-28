@@ -85,29 +85,7 @@ class WorkScheduleService
             $page
         );
 
-        $items = collect($paginator->items());
-
-        // Bulk-fetch all creator names in one HTTP call before mapping
-        $this->warmNameCache(
-            $items->pluck('created_by')->unique()->values()->all()
-        );
-
-        $enrichedItems = $items->map(function ($item) {
-            $row = $item instanceof \Illuminate\Database\Eloquent\Model ? $item->toArray() : (array) $item;
-
-            return array_merge($row, [
-                'created_by_name' => $this->getCreatorName($row['created_by']),
-                'status_label'    => $this->statusLabel((int) $row['work_sched_status']),
-            ]);
-        });
-
-        $enrichedPaginator = new LengthAwarePaginator(
-            $enrichedItems,
-            $paginator->total(),
-            $paginator->perPage(),
-            $paginator->currentPage(),
-            ['path' => LengthAwarePaginator::resolveCurrentPath()]
-        );
+        $enrichedPaginator = $this->enrichPaginator($paginator);
 
         $result = [
             'paginator' => $enrichedPaginator,
@@ -119,6 +97,70 @@ class WorkScheduleService
         }
 
         return $result;
+    }
+
+    // -------------------------------------------------------------------------
+    // HR Admin index — all records, no access-scope restriction
+    // -------------------------------------------------------------------------
+
+    public function getHrIndexData(
+        int    $status,
+        string $search,
+        string $orderBy,
+        string $orderDir,
+        int    $perPage,
+        int    $page,
+        bool   $withTabCounts = false
+    ): array {
+        $paginator = $this->repo->getPaginatedGroupsForHr(
+            $status,
+            $search,
+            $orderBy,
+            $orderDir,
+            $perPage,
+            $page
+        );
+
+        $result = [
+            'paginator' => $this->enrichPaginator($paginator),
+            'tabCounts' => [],
+        ];
+
+        if ($withTabCounts) {
+            $result['tabCounts'] = $this->repo->countAllStatusesForHr();
+        }
+
+        return $result;
+    }
+
+    // -------------------------------------------------------------------------
+    // Shared enrichment
+    // -------------------------------------------------------------------------
+
+    /**
+     * Bulk-resolve creator names and return a new LengthAwarePaginator
+     * with `created_by_name` added to every row.
+     */
+    private function enrichPaginator(LengthAwarePaginator $paginator): LengthAwarePaginator
+    {
+        $items = collect($paginator->items());
+
+        $this->warmNameCache($items->pluck('created_by')->unique()->values()->all());
+
+        $enriched = $items->map(function ($item) {
+            $row = $item instanceof \Illuminate\Database\Eloquent\Model ? $item->toArray() : (array) $item;
+            return array_merge($row, [
+                'created_by_name' => $this->getCreatorName($row['created_by']),
+            ]);
+        });
+
+        return new LengthAwarePaginator(
+            $enriched,
+            $paginator->total(),
+            $paginator->perPage(),
+            $paginator->currentPage(),
+            ['path' => LengthAwarePaginator::resolveCurrentPath()]
+        );
     }
 
     private function warmNameCache(array $ids): void
@@ -507,26 +549,4 @@ class WorkScheduleService
         return $days;
     }
 
-    public function statusLabel(int $status): string
-    {
-        return match ($status) {
-            1       => 'For Approval',
-            2       => 'To Acknowledge',
-            3       => 'Acknowledged',
-            4       => 'Disapproved',
-            default => 'Unknown',
-        };
-    }
-
-    public function statusVariant(int $status): string
-    {
-        return match ($status) {
-            0       => 'secondary',
-            1       => 'warning',
-            2       => 'info',
-            3       => 'success',
-            4       => 'destructive',
-            default => 'outline',
-        };
-    }
 }

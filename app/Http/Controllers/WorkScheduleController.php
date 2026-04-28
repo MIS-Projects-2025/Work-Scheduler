@@ -24,20 +24,19 @@ class WorkScheduleController extends Controller
         $empId       = session('emp_data.emp_id');
         $empPosition = (int) session('emp_data.emp_position', 0);
 
-        // Decode hash parameter if present
-        $hash = $request->input('hash', '');
-        $filters = [];
+        // ── TODO: replace with your actual HR admin check ─────────────────────
+        $isHrAdmin = false;
+        // ─────────────────────────────────────────────────────────────────────
 
-        if (!empty($hash)) {
+        $filters = [];
+        if ($hash = $request->input('hash')) {
             try {
-                $decoded = base64_decode($hash);
-                $filters = json_decode($decoded, true) ?? [];
-            } catch (\Exception $e) {
+                $filters = json_decode(base64_decode($hash), true) ?? [];
+            } catch (\Exception) {
                 $filters = [];
             }
         }
 
-        // Get filters from hash or use defaults
         $status   = (int) ($filters['status'] ?? 1);
         $search   = (string) ($filters['search'] ?? '');
         $orderBy  = (string) ($filters['orderBy'] ?? 'payroll_date_start');
@@ -45,44 +44,19 @@ class WorkScheduleController extends Controller
         $perPage  = (int) ($filters['perPage'] ?? 10);
         $page     = (int) ($filters['page'] ?? 1);
 
-        // Get paginated data using Laravel's paginator
-        $data = $this->service->getIndexData(
-            $empId,
-            $empPosition,
-            $status,
-            $search,
-            $orderBy,
-            $orderDir,
-            $perPage,
-            $page,
-            withTabCounts: true
-        );
+        $data = $isHrAdmin
+            ? $this->service->getHrIndexData($status, $search, $orderBy, $orderDir, $perPage, $page, withTabCounts: true)
+            : $this->service->getIndexData($empId, $empPosition, $status, $search, $orderBy, $orderDir, $perPage, $page, withTabCounts: true);
 
-        // Generate hash for current filters
-        $currentFilters = [
-            'status' => $status,
-            'search' => $search,
-            'orderBy' => $orderBy,
-            'orderDir' => $orderDir,
-            'perPage' => $perPage,
-            'page' => $page,
-        ];
-
-        $hash = base64_encode(json_encode($currentFilters));
+        $hash = base64_encode(json_encode(compact('status', 'search', 'orderBy', 'orderDir', 'perPage', 'page')));
 
         return inertia('WorkSchedule/Index', [
             'schedules'   => $data['paginator'],
             'tabCounts'   => $data['tabCounts'],
             'hash'        => $hash,
             'empPosition' => $empPosition,
-            'filters'     => [
-                'status'   => $status,
-                'search'   => $search,
-                'orderBy'  => $orderBy,
-                'orderDir' => $orderDir,
-                'perPage'  => $perPage,
-                'page'     => $page,
-            ],
+            'isHrAdmin'   => $isHrAdmin,
+            'filters'     => compact('status', 'search', 'orderBy', 'orderDir', 'perPage', 'page'),
         ]);
     }
 
@@ -284,8 +258,6 @@ class WorkScheduleController extends Controller
         if ($request->has('emp_ids')) {
             $rules['emp_ids'] = 'array';
         }
-
-        Log::info('Validation rules being applied:', $rules);
 
         return $request->validate($rules);
     }

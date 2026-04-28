@@ -120,6 +120,64 @@ class WorkScheduleRepository
         return $query->paginate($perPage, ['*'], 'page', $page);
     }
 
+    // -------------------------------------------------------------------------
+    // Work schedules — HR admin listing (no access-scope restriction)
+    // -------------------------------------------------------------------------
+
+    /**
+     * All schedule groups visible to HR admins, optionally filtered by status.
+     */
+    public function getPaginatedGroupsForHr(
+        int    $status,
+        string $search,
+        string $orderBy,
+        string $orderDir,
+        int    $perPage,
+        int    $page
+    ): LengthAwarePaginator {
+        $query = WorkSchedule::selectRaw('
+            MIN(id)                     AS id,
+            created_by,
+            payroll_date_start,
+            payroll_date_end,
+            work_sched_status,
+            COUNT(DISTINCT emp_id)      AS total_employees
+        ')
+            ->where('work_sched_status', $status)
+            ->groupBy('created_by', 'payroll_date_start', 'payroll_date_end', 'work_sched_status');
+
+        if ($search !== '') {
+            $query->where('created_by', 'like', "%{$search}%");
+        }
+
+        $allowedOrderCols = ['created_by', 'payroll_date_start', 'work_sched_status'];
+        $orderCol = in_array($orderBy, $allowedOrderCols) ? $orderBy : 'payroll_date_start';
+        $dir = strtolower($orderDir) === 'asc' ? 'asc' : 'desc';
+
+        return $query->orderBy($orderCol, $dir)->paginate($perPage, ['*'], 'page', $page);
+    }
+
+    /**
+     * Tab counts for HR admin — single query using conditional aggregation
+     * (4× faster than countAllStatuses which fires one query per status).
+     */
+    public function countAllStatusesForHr(): array
+    {
+        $row = WorkSchedule::selectRaw("
+            COUNT(DISTINCT CASE WHEN work_sched_status = 1 THEN CONCAT(created_by,'|',payroll_date_start,'|',payroll_date_end) END) AS forApproval,
+            COUNT(DISTINCT CASE WHEN work_sched_status = 2 THEN CONCAT(created_by,'|',payroll_date_start,'|',payroll_date_end) END) AS forAck,
+            COUNT(DISTINCT CASE WHEN work_sched_status = 3 THEN CONCAT(created_by,'|',payroll_date_start,'|',payroll_date_end) END) AS doneAck,
+            COUNT(DISTINCT CASE WHEN work_sched_status = 4 THEN CONCAT(created_by,'|',payroll_date_start,'|',payroll_date_end) END) AS disapproved
+        ")->first();
+
+        return [
+            'forApproval' => (int) ($row->forApproval ?? 0),
+            'forAck'      => (int) ($row->forAck      ?? 0),
+            'doneAck'     => (int) ($row->doneAck     ?? 0),
+            'disapproved' => (int) ($row->disapproved ?? 0),
+        ];
+    }
+
     /**
      * Count distinct groups for a specific status (used for XHR responses if needed)
      */
@@ -251,23 +309,6 @@ class WorkScheduleRepository
     // -------------------------------------------------------------------------
     // Work schedules — detail (view page)
     // -------------------------------------------------------------------------
-
-    /**
-     * Fetch all schedule rows for a specific cutoff + creator combination,
-     * eager-loading shift code data for each day.
-     */
-    public function getSchedulesByGroup(
-        string $createdBy,
-        string $dateStart,
-        string $dateEnd
-    ): Collection {
-        return WorkSchedule::where('payroll_date_start', $dateStart)
-            ->where('payroll_date_end', $dateEnd)
-            ->where('created_by', $createdBy)
-            ->with(['days.shiftCode'])
-            ->orderBy('emp_id')
-            ->get();
-    }
 
     // -------------------------------------------------------------------------
     // Work schedules - CRUD operations (with Loggable trait support)
