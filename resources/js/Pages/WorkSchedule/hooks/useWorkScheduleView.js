@@ -1,11 +1,10 @@
+// In hooks/useWorkScheduleView.js - add these new states and handlers
+
 import { useState, useEffect, useCallback, useMemo, useRef } from "react";
 import { router } from "@inertiajs/react";
 import dayjs from "dayjs";
 import { buildShiftMap, buildShiftOptions } from "../helpers/scheduleHelpers";
 
-/**
- * All state, derived values, and handlers for the WorkSchedule View page.
- */
 export function useWorkScheduleView({
     groupedData,
     shiftCodes,
@@ -28,10 +27,14 @@ export function useWorkScheduleView({
     const [legendCollapsed, setLegendCollapsed] = useState(false);
     const [search, setSearch] = useState(filters.search || "");
     const [perPage, setPerPage] = useState(filters.perPage || 20);
+
     // Cell edits: "rowIdx-colIdx" → { emp_id, work_date, shift_code_id }
     const [cellChanges, setCellChanges] = useState({});
     const [tableResetKey, setTableResetKey] = useState(0);
     const [submitProcessing, setSubmitProcessing] = useState(false);
+
+    // NEW: Remarks history modal state
+    const [showRemarksHistory, setShowRemarksHistory] = useState(false);
 
     // Number of static (non-date) columns — must match frozenColumns in View.jsx
     const STATIC_COLS = 6;
@@ -40,17 +43,17 @@ export function useWorkScheduleView({
 
     // ── Derived from props ────────────────────────────────────────────────────
     const status = filters.status ?? null;
-    const { isOwnRecord, isCreator, canApprove } = viewerContext;
+    const { isOwnRecord, isCreator, canApprove, isHrAdmin } = viewerContext;
     const canAcknowledge = isOwnRecord && status === 2;
     const isCutoffActive = dayjs().isBefore(dayjs(dateEnd).add(1, "day"));
     const canEdit = !!isCreator && isCutoffActive;
 
     const currentGroup = groupedData[0] || {};
-    const data        = currentGroup.schedules    || [];
-    const scheduleIds = currentGroup.scheduleIds  || [];   // rowIdx → WorkSchedule.id
-    const headers     = currentGroup.headers      || [];
-    const subHeaders  = currentGroup.subHeaders   || [];
-    const createdBy   = currentGroup.created_by   || "";
+    const data = currentGroup.schedules || [];
+    const scheduleIds = currentGroup.scheduleIds || []; // rowIdx → WorkSchedule.id
+    const headers = currentGroup.headers || [];
+    const subHeaders = currentGroup.subHeaders || [];
+    const createdBy = currentGroup.created_by || "";
 
     // ── Shared shift helpers (same source as useWorkSchedule) ─────────────────
     const shiftMap = useMemo(() => buildShiftMap(shiftCodes), [shiftCodes]);
@@ -146,7 +149,17 @@ export function useWorkScheduleView({
             "msfullscreenchange",
         ];
         events.forEach((e) => document.addEventListener(e, handler));
-        return () => events.forEach((e) => document.removeEventListener(e, handler));
+        return () =>
+            events.forEach((e) => document.removeEventListener(e, handler));
+    }, []);
+
+    // ── Remarks History Handlers ──────────────────────────────────────────────
+    const openRemarksHistory = useCallback(() => {
+        setShowRemarksHistory(true);
+    }, []);
+
+    const closeRemarksHistory = useCallback(() => {
+        setShowRemarksHistory(false);
     }, []);
 
     // ── Actions ────────────────────────────────────────────────────────────────
@@ -161,20 +174,29 @@ export function useWorkScheduleView({
     };
 
     // ── Cell edits (status=1, creator only) ───────────────────────────────────
-    const handleCellChange = useCallback((rowIdx, colIdx, value) => {
-        const workScheduleId = scheduleIds[rowIdx];
-        const dayOffset      = colIdx - STATIC_COLS;
-        if (!workScheduleId || dayOffset < 0) return;
+    const handleCellChange = useCallback(
+        (rowIdx, colIdx, value) => {
+            const workScheduleId = scheduleIds[rowIdx];
+            const dayOffset = colIdx - STATIC_COLS;
+            if (!workScheduleId || dayOffset < 0) return;
 
-        const workDate    = dayjs(dateStart).add(dayOffset, "day").format("YYYY-MM-DD");
-        const shiftCodeId = shiftMap[value]?.id ?? null;
-        const key         = `${rowIdx}-${colIdx}`;
+            const workDate = dayjs(dateStart)
+                .add(dayOffset, "day")
+                .format("YYYY-MM-DD");
+            const shiftCodeId = shiftMap[value]?.id ?? null;
+            const key = `${rowIdx}-${colIdx}`;
 
-        setCellChanges((prev) => ({
-            ...prev,
-            [key]: { work_schedule_id: workScheduleId, work_date: workDate, shift_code_id: shiftCodeId },
-        }));
-    }, [scheduleIds, dateStart, shiftMap, STATIC_COLS]);
+            setCellChanges((prev) => ({
+                ...prev,
+                [key]: {
+                    work_schedule_id: workScheduleId,
+                    work_date: workDate,
+                    shift_code_id: shiftCodeId,
+                },
+            }));
+        },
+        [scheduleIds, dateStart, shiftMap, STATIC_COLS],
+    );
 
     const handleResetEdits = useCallback(() => {
         setCellChanges({});
@@ -191,16 +213,10 @@ export function useWorkScheduleView({
             { date_start: dateStart, date_end: dateEnd, changes },
             {
                 onSuccess: () => {
-                    // Clear the parent's change map (hides the save/reset bar)
                     setCellChanges({});
-                    // Increment key → ScheduleTableViewing remounts →
-                    // useCellEdit's cellEdits/localEditedCells reset to empty,
-                    // so fresh server values show instead of the stale overrides.
                     setTableResetKey((k) => k + 1);
-                    // Do NOT call navigate() here — back() from the controller
-                    // already triggered a full Inertia visit with refreshed props.
                 },
-                onError:  () => setSubmitProcessing(false),
+                onError: () => setSubmitProcessing(false),
                 onFinish: () => setSubmitProcessing(false),
             },
         );
@@ -218,9 +234,7 @@ export function useWorkScheduleView({
     };
 
     const handleSelectAll = (checked) => {
-        setSelectedRows(
-            checked ? new Set(data.map((_, i) => i)) : new Set(),
-        );
+        setSelectedRows(checked ? new Set(data.map((_, i) => i)) : new Set());
     };
 
     const openBulkAction = (action) => {
@@ -238,7 +252,11 @@ export function useWorkScheduleView({
             setAcknowledging(true);
             router.post(
                 route("workschedule.acknowledge"),
-                { created_by: createdBy, date_start: dateStart, date_end: dateEnd },
+                {
+                    created_by: createdBy,
+                    date_start: dateStart,
+                    date_end: dateEnd,
+                },
                 {
                     onSuccess: () => {
                         closeDialog();
@@ -254,9 +272,10 @@ export function useWorkScheduleView({
             return;
         }
 
-        const routeName = action === "approve"
-            ? "workschedule.approve"
-            : "workschedule.disapprove";
+        const routeName =
+            action === "approve"
+                ? "workschedule.approve"
+                : "workschedule.disapprove";
         const targetStatus = action === "approve" ? 2 : 4;
         const selectedEmpIds = [...selectedRows].map((idx) => data[idx][0]);
 
@@ -316,11 +335,13 @@ export function useWorkScheduleView({
         setSearch,
         perPage,
         setPerPage,
+        showRemarksHistory,
         // derived
         status,
         canApprove,
         canAcknowledge,
         canEdit,
+        isHrAdmin,
         createdBy,
         data,
         headers,
@@ -335,6 +356,9 @@ export function useWorkScheduleView({
         handleCellChange,
         handleResetEdits,
         handleSubmitEdits,
+        // remarks history handlers
+        openRemarksHistory,
+        closeRemarksHistory,
         // handlers
         toggleFullscreen,
         handleRowSelect,

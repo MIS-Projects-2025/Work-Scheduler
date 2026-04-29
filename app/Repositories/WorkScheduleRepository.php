@@ -4,9 +4,11 @@ namespace App\Repositories;
 
 use App\Models\Holiday;
 use App\Models\PayrollCutoffSchedule;
+use App\Models\RemarksHistory;
 use App\Models\ShiftCode;
 use App\Models\WorkSchedule;
 use App\Models\WorkScheduleDay;
+use App\Services\HrisApiService;
 use Illuminate\Support\Collection;
 use Illuminate\Contracts\Pagination\LengthAwarePaginator;
 use Illuminate\Support\Facades\DB;
@@ -162,7 +164,7 @@ class WorkScheduleRepository
         if ($search !== '') {
             $query->where(function ($q) use ($search) {
                 $q->where('payroll_date_start', 'like', "%{$search}%")
-                  ->orWhere('payroll_date_end', 'like', "%{$search}%");
+                    ->orWhere('payroll_date_end', 'like', "%{$search}%");
             });
         }
 
@@ -574,5 +576,15 @@ class WorkScheduleRepository
                 ->orWhere('created_by', $empId)
                 ->orWhere('approver2_id', $empId);
         })->where('work_sched_status', $status);
+    }
+
+    public function getWorkSchedulesWithRemarksHistory(string $dateStart, string $dateEnd): Collection
+    {
+        return WorkSchedule::where('payroll_date_start', $dateStart)
+            ->where('payroll_date_end', $dateEnd)
+            ->with(['remarksHistory' => function ($query) {
+                $query->orderBy('updated_at', 'desc');
+            }])
+            ->get();
     }
 }

@@ -1,7 +1,16 @@
+// In WorkScheduleView.jsx
+
 import AuthenticatedLayout from "@/Layouts/AuthenticatedLayout";
 import { Head } from "@inertiajs/react";
 import dayjs from "dayjs";
-import { Loader2, Search, CheckCheck, RotateCcw, Save } from "lucide-react";
+import {
+    Loader2,
+    Search,
+    CheckCheck,
+    RotateCcw,
+    Save,
+    Clock,
+} from "lucide-react";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -18,6 +27,7 @@ import ScheduleTableViewing from "./ScheduleTableViewing";
 import ShiftLegend from "./components/ShiftLegend";
 import ViewHeader from "./components/ViewHeader";
 import RemarksDialog from "./components/RemarksDialog";
+import RemarksHistoryModal from "./components/RemarksHistoryModal";
 import { useWorkScheduleView } from "./hooks/useWorkScheduleView";
 
 const PAGE_SIZES = [10, 20, 50, 100];
@@ -51,6 +61,7 @@ export default function WorkScheduleView({
         canApprove,
         canAcknowledge,
         canEdit,
+        isHrAdmin, // Get from hook
         createdBy,
         data,
         headers,
@@ -61,9 +72,12 @@ export default function WorkScheduleView({
         tableResetKey,
         editedCellCount,
         submitProcessing,
+        showRemarksHistory, // Get from hook
         handleCellChange,
         handleResetEdits,
         handleSubmitEdits,
+        openRemarksHistory, // Get from hook
+        closeRemarksHistory, // Get from hook
         toggleFullscreen,
         handleRowSelect,
         handleSelectAll,
@@ -112,20 +126,33 @@ export default function WorkScheduleView({
                                 shifts={shiftCodes}
                                 shiftMap={shiftMap}
                                 collapsed={legendCollapsed}
-                                onToggle={() =>
-                                    setLegendCollapsed((p) => !p)
-                                }
+                                onToggle={() => setLegendCollapsed((p) => !p)}
                             />
                         </CardContent>
 
                         {/* Action buttons + Search + per-page controls */}
                         <div className="px-4 py-2 flex items-center justify-between gap-3 border-b flex-wrap">
-                            {/* Left: acknowledge / bulk approve-disapprove */}
-                            <div className="flex items-center gap-2">
+                            {/* Left: remarks history button for HR + acknowledge / bulk approve-disapprove */}
+                            <div className="flex items-center gap-2 flex-wrap">
+                                {/* Remarks History button - only for HR admins */}
+                                {isHrAdmin && (
+                                    <Button
+                                        size="sm"
+                                        variant="outline"
+                                        onClick={openRemarksHistory}
+                                        className="gap-2"
+                                    >
+                                        <Clock className="w-4 h-4" />
+                                        View Remarks History
+                                    </Button>
+                                )}
+
                                 {canAcknowledge && (
                                     <Button
                                         size="sm"
-                                        onClick={() => openDialog("acknowledge")}
+                                        onClick={() =>
+                                            openDialog("acknowledge")
+                                        }
                                         disabled={acknowledging}
                                         className="gap-2 bg-green-600 hover:bg-green-700 text-white"
                                     >
@@ -146,8 +173,12 @@ export default function WorkScheduleView({
                                     <BulkActionBar
                                         selectedCount={selectedRows.size}
                                         processing={bulkProcessing}
-                                        onApprove={() => openBulkAction("approve")}
-                                        onDisapprove={() => openBulkAction("disapprove")}
+                                        onApprove={() =>
+                                            openBulkAction("approve")
+                                        }
+                                        onDisapprove={() =>
+                                            openBulkAction("disapprove")
+                                        }
                                     />
                                 )}
                             </div>
@@ -159,7 +190,9 @@ export default function WorkScheduleView({
                                     <Input
                                         placeholder="Search by ID or name..."
                                         value={search}
-                                        onChange={(e) => setSearch(e.target.value)}
+                                        onChange={(e) =>
+                                            setSearch(e.target.value)
+                                        }
                                         className="pl-8 h-8 text-sm"
                                     />
                                 </div>
@@ -205,7 +238,11 @@ export default function WorkScheduleView({
                                     {canEdit && editedCellCount > 0 && (
                                         <div className="flex items-center justify-between gap-3 rounded-md border border-yellow-300 bg-yellow-50 dark:bg-yellow-950/20 dark:border-yellow-800 px-4 py-2">
                                             <span className="text-sm text-yellow-800 dark:text-yellow-300 font-medium">
-                                                {editedCellCount} cell{editedCellCount !== 1 ? "s" : ""} edited — unsaved changes
+                                                {editedCellCount} cell
+                                                {editedCellCount !== 1
+                                                    ? "s"
+                                                    : ""}{" "}
+                                                edited — unsaved changes
                                             </span>
                                             <div className="flex items-center gap-2">
                                                 <Button
@@ -229,7 +266,9 @@ export default function WorkScheduleView({
                                                     ) : (
                                                         <Save className="w-3.5 h-3.5" />
                                                     )}
-                                                    {submitProcessing ? "Saving..." : "Save Changes"}
+                                                    {submitProcessing
+                                                        ? "Saving..."
+                                                        : "Save Changes"}
                                                 </Button>
                                             </div>
                                         </div>
@@ -285,6 +324,15 @@ export default function WorkScheduleView({
                 onConfirm={handleConfirm}
                 onClose={closeDialog}
                 processing={bulkProcessing}
+            />
+
+            {/* Remarks History Modal - only for HR admins */}
+            <RemarksHistoryModal
+                open={showRemarksHistory}
+                onClose={closeRemarksHistory}
+                dateStart={dateStart}
+                dateEnd={dateEnd}
+                cutoffLabel={formattedDateRange}
             />
         </div>
     );

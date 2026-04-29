@@ -281,6 +281,40 @@ class WorkScheduleController extends Controller
         return back();
     }
 
+
+
+    /**
+     * Get remarks history for a cutoff period (HR admin only)
+     */
+    public function getRemarksHistory(Request $request)
+    {
+        try {
+            $validated = $request->validate([
+                'date_start' => 'required|date',
+                'date_end' => 'required|date',
+            ]);
+
+            // Authorization check
+            $isHrAdmin = (string) session('emp_data.emp_system_role') === 'hr_admin';
+            if (!$isHrAdmin) {
+                return response()->json(['error' => 'Unauthorized'], 403);
+            }
+
+            // Delegate to service
+            $history = $this->service->getRemarksHistoryForHr(
+                $validated['date_start'],
+                $validated['date_end']
+            );
+
+            return response()->json($history);
+        } catch (\Illuminate\Validation\ValidationException $e) {
+            return response()->json(['error' => $e->errors()], 422);
+        } catch (\Exception $e) {
+            Log::error('Failed to fetch remarks history: ' . $e->getMessage());
+            return response()->json(['error' => 'Failed to fetch remarks history'], 500);
+        }
+    }
+
     private function validateRequest(Request $request, $requireRemarks = false)
     {
         $rules = [

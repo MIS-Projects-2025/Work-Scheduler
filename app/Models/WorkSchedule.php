@@ -36,4 +36,8 @@ class WorkSchedule extends Model
     {
         return $this->hasMany(WorkScheduleDay::class, 'work_schedule_id');
     }
+    public function remarksHistory()
+    {
+        return $this->hasMany(RemarksHistory::class, 'work_sched_id', 'id');
+    }
 }

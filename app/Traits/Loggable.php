@@ -11,7 +11,7 @@ trait Loggable
 {
     public static function bootLoggable()
     {
-        Log::info('[Loggable] bootLoggable triggered for: ' . static::class);
+
 
         static::created(function ($model) {
             Log::info('[Loggable] created event fired', [

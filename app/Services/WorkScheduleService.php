@@ -705,6 +705,118 @@ class WorkScheduleService
 
         return $updated;
     }
+
+
+    public function getRemarksHistoryForHr(string $dateStart, string $dateEnd): array
+    {
+        // Add debug logging
+        Log::info('Fetching remarks history for HR', [
+            'date_start' => $dateStart,
+            'date_end' => $dateEnd
+        ]);
+
+        $schedules = $this->repo->getWorkSchedulesWithRemarksHistory($dateStart, $dateEnd);
+
+        Log::info('Schedules found', [
+            'count' => $schedules->count(),
+            'schedule_ids' => $schedules->pluck('id')->toArray()
+        ]);
+
+        if ($schedules->isEmpty()) {
+            return ['total' => 0, 'grouped_by_employee' => [], 'all_history' => []];
+        }
+
+        // Check if remarks history is loaded
+        foreach ($schedules as $schedule) {
+            Log::info('Schedule ID: ' . $schedule->id . ' has remarks history count: ' . $schedule->remarksHistory->count());
+        }
+
+        // Collect all unique employee IDs
+        $allIds = $schedules->pluck('emp_id')
+            ->merge($schedules->flatMap(fn($s) => $s->remarksHistory->pluck('updated_by')))
+            ->unique()
+            ->values()
+            ->toArray();
+
+        Log::info('Employee IDs to fetch', ['ids' => $allIds]);
+
+        // Fetch names once
+        $employeeNames = $this->getEmployeeNamesBulk($allIds);
+
+        // Build history array
+        $history = [];
+        foreach ($schedules as $schedule) {
+            foreach ($schedule->remarksHistory as $record) {
+                $history[] = [
+                    'history_id' => $record->history_id,
+                    'emp_id' => $schedule->emp_id,
+                    'emp_name' => $employeeNames[$schedule->emp_id] ?? $record->empname ?? 'Unknown',
+                    'old_remarks' => $record->old_remarks,
+                    'new_remarks' => $record->new_remarks,
+                    'operation' => $record->operation,
+                    'updated_at' => $record->updated_at,
+                    'updated_by' => $record->updated_by,
+                    'updated_by_name' => $employeeNames[$record->updated_by] ?? $record->updated_by,
+                ];
+            }
+        }
+
+        Log::info('History entries built', ['count' => count($history)]);
+
+        return [
+            'total' => count($history),
+            'grouped_by_employee' => $this->groupRemarksHistoryByEmployee($history),
+            'all_history' => $history,
+        ];
+    }
+    /**
+     * Bulk fetch employee names from HRIS (business logic)
+     */
+    private function getEmployeeNamesBulk(array $employeeIds): array
+    {
+        if (empty($employeeIds)) {
+            return [];
+        }
+
+        try {
+            return $this->hris->fetchEmployeeNamesBulk($employeeIds);
+        } catch (\Exception $e) {
+            Log::error('Failed to fetch employee names from HRIS: ' . $e->getMessage());
+            return [];
+        }
+    }
+
+    /**
+     * Group remarks history by employee (business logic)
+     */
+    private function groupRemarksHistoryByEmployee(array $history): array
+    {
+        $grouped = [];
+
+        foreach ($history as $item) {
+            $empId = $item['emp_id'];
+            if (!$empId) continue;
+
+            if (!isset($grouped[$empId])) {
+                $grouped[$empId] = [
+                    'emp_id' => $empId,
+                    'emp_name' => $item['emp_name'],
+                    'history' => [],
+                ];
+            }
+
+            $grouped[$empId]['history'][] = $item;
+        }
+
+        // Sort each employee's history by date desc
+        foreach ($grouped as &$employee) {
+            usort($employee['history'], function ($a, $b) {
+                return strtotime($b['updated_at']) - strtotime($a['updated_at']);
+            });
+        }
+
+        return array_values($grouped);
+    }
     // -------------------------------------------------------------------------
     // Helpers
     // -------------------------------------------------------------------------
@@ -720,5 +832,4 @@ class WorkScheduleService
         }
         return $days;
     }
-
 }
