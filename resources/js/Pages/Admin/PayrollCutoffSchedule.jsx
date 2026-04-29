@@ -28,7 +28,6 @@ import {
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Badge } from "@/components/ui/badge";
 import {
     Select,
     SelectContent,
@@ -45,7 +44,7 @@ import {
 } from "@/components/ui/card";
 import { toast } from "sonner";
 import {
-    CalendarDays,
+    CalendarRange,
     Plus,
     Pencil,
     Trash2,
@@ -59,52 +58,28 @@ import AuthenticatedLayout from "@/Layouts/AuthenticatedLayout";
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 
-const HOLIDAY_TYPES = ["Regular", "Special"];
-
-const PRESET_COLORS = [
-    { label: "Red", value: "#EF4444" },
-    { label: "Orange", value: "#F97316" },
-    { label: "Amber", value: "#F59E0B" },
-    { label: "Green", value: "#22C55E" },
-    { label: "Blue", value: "#3B82F6" },
-    { label: "Purple", value: "#A855F7" },
-    { label: "Pink", value: "#EC4899" },
-];
-
-const EMPTY_FORM = {
-    holiday_name: "",
-    holiday_date: "",
-    holiday_type: "Regular",
-    color: "#EF4444",
-};
-
 const PER_PAGE_OPTIONS = ["10", "15", "25", "50"];
 
-// ─── API helpers ──────────────────────────────────────────────────────────────
+const EMPTY_FORM = {
+    payroll_date_start: "",
+    payroll_date_end: "",
+};
 
-async function apiFetch(url, options = {}) {
-    const csrfToken = document
-        .querySelector('meta[name="csrf-token"]')
-        ?.getAttribute("content");
-    const res = await fetch(url, {
-        headers: {
-            "Content-Type": "application/json",
-            "X-Requested-With": "XMLHttpRequest",
-            ...(csrfToken ? { "X-CSRF-TOKEN": csrfToken } : {}),
-        },
-        ...options,
+// ─── Helpers ──────────────────────────────────────────────────────────────────
+
+function formatDate(dateStr) {
+    if (!dateStr) return "—";
+    return new Date(dateStr).toLocaleDateString("en-PH", {
+        year: "numeric",
+        month: "short",
+        day: "numeric",
     });
-    const json = await res.json();
-    if (!res.ok || !json.success)
-        throw new Error(json.message ?? "Request failed.");
-    return json;
 }
 
 // ─── Component ────────────────────────────────────────────────────────────────
 
-export default function Holiday() {
-    // Server-side pagination state
-    const [holidays, setHolidays] = useState([]);
+export default function PayrollCutoffSchedule() {
+    const [records, setRecords] = useState([]);
     const [meta, setMeta] = useState({
         current_page: 1,
         last_page: 1,
@@ -114,27 +89,24 @@ export default function Holiday() {
     const [loading, setLoading] = useState(false);
     const [saving, setSaving] = useState(false);
 
-    // Filters (controlled; applied on Enter / blur / button for search)
+    const [searchInput, setSearchInput] = useState("");
     const [search, setSearch] = useState("");
-    const [searchInput, setSearchInput] = useState(""); // debounced input
     const [yearFilter, setYearFilter] = useState(
         String(new Date().getFullYear()),
     );
     const [perPage, setPerPage] = useState("15");
     const [page, setPage] = useState(1);
 
-    // Dialog state
     const [dialogOpen, setDialogOpen] = useState(false);
     const [editTarget, setEditTarget] = useState(null);
     const [form, setForm] = useState(EMPTY_FORM);
     const [formErrors, setFormErrors] = useState({});
 
-    // Delete confirm
     const [deleteTarget, setDeleteTarget] = useState(null);
     const [deleting, setDeleting] = useState(false);
 
-    // Debounce search input
     const debounceRef = useRef(null);
+
     function handleSearchInput(value) {
         setSearchInput(value);
         clearTimeout(debounceRef.current);
@@ -146,7 +118,7 @@ export default function Holiday() {
 
     // ── Fetch ─────────────────────────────────────────────────────────────────
 
-    const fetchHolidays = useCallback(
+    const fetchRecords = useCallback(
         async (currentPage = page) => {
             setLoading(true);
             try {
@@ -157,19 +129,22 @@ export default function Holiday() {
                 params.set("per_page", perPage);
                 params.set("page", String(currentPage));
 
-                const json = await apiFetch(`/holidays?${params.toString()}`);
+                const { data: json } = await axios.get(
+                    route(
+                        "payroll-cutoff-schedules.index",
+                        Object.fromEntries(params),
+                    ),
+                );
 
-                // Laravel paginator shape: json.data.data / json.data.current_page etc.
-                const paginator = json.data;
-                setHolidays(paginator.data);
+                setRecords(json.data.data);
                 setMeta({
-                    current_page: paginator.current_page,
-                    last_page: paginator.last_page,
-                    total: paginator.total,
-                    per_page: paginator.per_page,
+                    current_page: json.data.current_page,
+                    last_page: json.data.last_page,
+                    total: json.data.total,
+                    per_page: json.data.per_page,
                 });
             } catch (e) {
-                toast.error(e.message);
+                toast.error(e.response?.data?.message ?? e.message);
             } finally {
                 setLoading(false);
             }
@@ -178,10 +153,8 @@ export default function Holiday() {
     );
 
     useEffect(() => {
-        fetchHolidays(page);
+        fetchRecords(page);
     }, [yearFilter, search, perPage, page]);
-
-    // Reset to page 1 when filters change
     useEffect(() => {
         setPage(1);
     }, [yearFilter, search, perPage]);
@@ -195,13 +168,12 @@ export default function Holiday() {
         setDialogOpen(true);
     }
 
-    function openEdit(holiday) {
-        setEditTarget(holiday);
+    function openEdit(record) {
+        setEditTarget(record);
         setForm({
-            holiday_name: holiday.holiday_name,
-            holiday_date: holiday.holiday_date?.substring(0, 10) ?? "",
-            holiday_type: holiday.holiday_type,
-            color: holiday.color ?? "#EF4444",
+            payroll_date_start:
+                record.payroll_date_start?.substring(0, 10) ?? "",
+            payroll_date_end: record.payroll_date_end?.substring(0, 10) ?? "",
         });
         setFormErrors({});
         setDialogOpen(true);
@@ -209,12 +181,17 @@ export default function Holiday() {
 
     function validateForm() {
         const errors = {};
-        if (!form.holiday_name.trim())
-            errors.holiday_name = "Name is required.";
-        if (!form.holiday_date) errors.holiday_date = "Date is required.";
-        if (!form.holiday_type) errors.holiday_type = "Type is required.";
-        if (!/^#[0-9A-Fa-f]{6}$/.test(form.color))
-            errors.color = "Invalid hex color.";
+        if (!form.payroll_date_start)
+            errors.payroll_date_start = "Start date is required.";
+        if (!form.payroll_date_end)
+            errors.payroll_date_end = "End date is required.";
+        if (
+            form.payroll_date_start &&
+            form.payroll_date_end &&
+            form.payroll_date_end <= form.payroll_date_start
+        ) {
+            errors.payroll_date_end = "End date must be after start date.";
+        }
         setFormErrors(errors);
         return Object.keys(errors).length === 0;
     }
@@ -226,22 +203,21 @@ export default function Holiday() {
         setSaving(true);
         try {
             if (editTarget) {
-                await apiFetch(`/holidays/${editTarget.ID}`, {
-                    method: "PUT",
-                    body: JSON.stringify(form),
-                });
-                toast.success("Holiday updated successfully.");
+                await axios.put(
+                    route("payroll-cutoff-schedules.update", {
+                        id: editTarget.ID,
+                    }),
+                    form,
+                );
+                toast.success("Cutoff schedule updated successfully.");
             } else {
-                await apiFetch("/holidays", {
-                    method: "POST",
-                    body: JSON.stringify(form),
-                });
-                toast.success("Holiday created successfully.");
+                await axios.post(route("payroll-cutoff-schedules.store"), form);
+                toast.success("Cutoff schedule created successfully.");
             }
             setDialogOpen(false);
-            fetchHolidays(page);
+            fetchRecords(page);
         } catch (e) {
-            toast.error(e.message);
+            toast.error(e.response?.data?.message ?? e.message);
         } finally {
             setSaving(false);
         }
@@ -253,17 +229,18 @@ export default function Holiday() {
         if (!deleteTarget) return;
         setDeleting(true);
         try {
-            await apiFetch(`/holidays/${deleteTarget.ID}`, {
-                method: "DELETE",
-            });
-            toast.success("Holiday removed successfully.");
+            await axios.delete(
+                route("payroll-cutoff-schedules.destroy", {
+                    id: deleteTarget.ID,
+                }),
+            );
+            toast.success("Cutoff schedule deleted successfully.");
             setDeleteTarget(null);
-            // If last item on page > 1, go back a page
-            const newPage = holidays.length === 1 && page > 1 ? page - 1 : page;
+            const newPage = records.length === 1 && page > 1 ? page - 1 : page;
             setPage(newPage);
-            fetchHolidays(newPage);
+            fetchRecords(newPage);
         } catch (e) {
-            toast.error(e.message);
+            toast.error(e.response?.data?.message ?? e.message);
         } finally {
             setDeleting(false);
         }
@@ -275,8 +252,6 @@ export default function Holiday() {
         String(new Date().getFullYear() - 1 + i),
     );
 
-    // ── Pagination helpers ────────────────────────────────────────────────────
-
     const from =
         meta.total === 0 ? 0 : (meta.current_page - 1) * meta.per_page + 1;
     const to = Math.min(meta.current_page * meta.per_page, meta.total);
@@ -285,18 +260,18 @@ export default function Holiday() {
 
     return (
         <AuthenticatedLayout>
-            <div className="p-6 space-y-6 max-w-6xl mx-auto">
+            <div className="p-6 space-y-6 max-w-5xl mx-auto">
                 {/* ── Page header ── */}
                 <div className="flex items-center gap-3">
                     <div className="p-2 rounded-lg bg-primary/10">
-                        <CalendarDays className="h-6 w-6 text-primary" />
+                        <CalendarRange className="h-6 w-6 text-primary" />
                     </div>
                     <div>
                         <h1 className="text-2xl font-semibold tracking-tight">
-                            Holiday Maintenance
+                            Payroll Cutoff Schedule
                         </h1>
                         <p className="text-sm text-muted-foreground">
-                            Manage company holidays for payroll and scheduling.
+                            Manage payroll cutoff date ranges for processing.
                         </p>
                     </div>
                 </div>
@@ -307,7 +282,7 @@ export default function Holiday() {
                         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
                             <div>
                                 <CardTitle className="text-base">
-                                    Holidays
+                                    Schedules
                                 </CardTitle>
                                 <CardDescription>
                                     {meta.total} record
@@ -316,7 +291,6 @@ export default function Holiday() {
                             </div>
 
                             <div className="flex flex-wrap items-center gap-2">
-                                {/* Year filter */}
                                 <Select
                                     value={yearFilter}
                                     onValueChange={(v) => {
@@ -339,7 +313,6 @@ export default function Holiday() {
                                     </SelectContent>
                                 </Select>
 
-                                {/* Search */}
                                 <div className="relative">
                                     <Search className="absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground" />
                                     <Input
@@ -352,11 +325,10 @@ export default function Holiday() {
                                     />
                                 </div>
 
-                                {/* Refresh */}
                                 <Button
                                     variant="outline"
                                     size="icon"
-                                    onClick={() => fetchHolidays(page)}
+                                    onClick={() => fetchRecords(page)}
                                     disabled={loading}
                                 >
                                     <RefreshCw
@@ -364,13 +336,12 @@ export default function Holiday() {
                                     />
                                 </Button>
 
-                                {/* Add */}
                                 <Button
                                     onClick={openCreate}
                                     className="gap-1.5"
                                 >
                                     <Plus className="h-4 w-4" />
-                                    Add Holiday
+                                    Add Schedule
                                 </Button>
                             </div>
                         </div>
@@ -383,10 +354,9 @@ export default function Holiday() {
                                     <TableHead className="w-12 pl-6">
                                         #
                                     </TableHead>
-                                    <TableHead>Holiday Name</TableHead>
-                                    <TableHead>Date</TableHead>
-                                    <TableHead>Type</TableHead>
-                                    <TableHead>Color</TableHead>
+                                    <TableHead>Start Date</TableHead>
+                                    <TableHead>End Date</TableHead>
+                                    <TableHead>Created By</TableHead>
                                     <TableHead className="text-right pr-6">
                                         Actions
                                     </TableHead>
@@ -397,68 +367,38 @@ export default function Holiday() {
                                 {loading ? (
                                     <TableRow>
                                         <TableCell
-                                            colSpan={6}
+                                            colSpan={5}
                                             className="h-32 text-center text-muted-foreground"
                                         >
                                             <Loader2 className="inline h-5 w-5 animate-spin mr-2" />
-                                            Loading holidays...
+                                            Loading schedules...
                                         </TableCell>
                                     </TableRow>
-                                ) : holidays.length === 0 ? (
+                                ) : records.length === 0 ? (
                                     <TableRow>
                                         <TableCell
-                                            colSpan={6}
+                                            colSpan={5}
                                             className="h-32 text-center text-muted-foreground"
                                         >
-                                            No holidays found.
+                                            No schedules found.
                                         </TableCell>
                                     </TableRow>
                                 ) : (
-                                    holidays.map((h, idx) => (
-                                        <TableRow key={h.ID} className="group">
+                                    records.map((r, idx) => (
+                                        <TableRow key={r.ID} className="group">
                                             <TableCell className="pl-6 text-muted-foreground text-sm">
                                                 {from + idx}
                                             </TableCell>
-                                            <TableCell className="font-medium">
-                                                {h.holiday_name}
+                                            <TableCell className="tabular-nums text-sm font-medium">
+                                                {formatDate(
+                                                    r.payroll_date_start,
+                                                )}
                                             </TableCell>
                                             <TableCell className="tabular-nums text-sm">
-                                                {new Date(
-                                                    h.holiday_date,
-                                                ).toLocaleDateString("en-PH", {
-                                                    year: "numeric",
-                                                    month: "short",
-                                                    day: "numeric",
-                                                })}
+                                                {formatDate(r.payroll_date_end)}
                                             </TableCell>
-                                            <TableCell>
-                                                <Badge
-                                                    variant={
-                                                        h.holiday_type ===
-                                                        "Regular"
-                                                            ? "default"
-                                                            : "secondary"
-                                                    }
-                                                >
-                                                    {h.holiday_type}
-                                                </Badge>
-                                            </TableCell>
-                                            <TableCell>
-                                                <div className="flex items-center gap-2">
-                                                    <span
-                                                        className="inline-block h-5 w-5 rounded border border-border shadow-sm flex-shrink-0"
-                                                        style={{
-                                                            backgroundColor:
-                                                                h.color ??
-                                                                "#EF4444",
-                                                        }}
-                                                    />
-                                                    <span className="text-xs text-muted-foreground font-mono">
-                                                        {(
-                                                            h.color ?? "#EF4444"
-                                                        ).toUpperCase()}
-                                                    </span>
-                                                </div>
+                                            <TableCell className="text-sm text-muted-foreground">
+                                                {r.created_by ?? "—"}
                                             </TableCell>
                                             <TableCell className="text-right pr-6">
                                                 <div className="flex justify-end gap-1">
@@ -467,7 +407,7 @@ export default function Holiday() {
                                                         size="icon"
                                                         className="h-8 w-8"
                                                         onClick={() =>
-                                                            openEdit(h)
+                                                            openEdit(r)
                                                         }
                                                     >
                                                         <Pencil className="h-3.5 w-3.5" />
@@ -477,7 +417,7 @@ export default function Holiday() {
                                                         size="icon"
                                                         className="h-8 w-8 text-destructive hover:text-destructive"
                                                         onClick={() =>
-                                                            setDeleteTarget(h)
+                                                            setDeleteTarget(r)
                                                         }
                                                     >
                                                         <Trash2 className="h-3.5 w-3.5" />
@@ -514,7 +454,6 @@ export default function Holiday() {
                                         </SelectContent>
                                     </Select>
                                 </div>
-
                                 <div className="flex items-center gap-4">
                                     <span>
                                         {from}–{to} of {meta.total}
@@ -557,153 +496,59 @@ export default function Holiday() {
                     <DialogContent className="sm:max-w-md">
                         <DialogHeader>
                             <DialogTitle>
-                                {editTarget ? "Edit Holiday" : "Add Holiday"}
+                                {editTarget ? "Edit Schedule" : "Add Schedule"}
                             </DialogTitle>
                             <DialogDescription>
                                 {editTarget
-                                    ? "Update the details of this holiday."
-                                    : "Fill in the details to add a new holiday."}
+                                    ? "Update the cutoff date range."
+                                    : "Define a new payroll cutoff date range."}
                             </DialogDescription>
                         </DialogHeader>
 
                         <div className="space-y-4 py-2">
-                            {/* Holiday Name */}
                             <div className="space-y-1.5">
-                                <Label htmlFor="holiday_name">
-                                    Holiday Name{" "}
+                                <Label htmlFor="payroll_date_start">
+                                    Start Date{" "}
                                     <span className="text-destructive">*</span>
                                 </Label>
                                 <Input
-                                    id="holiday_name"
-                                    placeholder="e.g. New Year's Day"
-                                    value={form.holiday_name}
-                                    onChange={(e) =>
-                                        setForm({
-                                            ...form,
-                                            holiday_name: e.target.value,
-                                        })
-                                    }
-                                />
-                                {formErrors.holiday_name && (
-                                    <p className="text-xs text-destructive">
-                                        {formErrors.holiday_name}
-                                    </p>
-                                )}
-                            </div>
-
-                            {/* Date */}
-                            <div className="space-y-1.5">
-                                <Label htmlFor="holiday_date">
-                                    Date{" "}
-                                    <span className="text-destructive">*</span>
-                                </Label>
-                                <Input
-                                    id="holiday_date"
+                                    id="payroll_date_start"
                                     type="date"
-                                    value={form.holiday_date}
+                                    value={form.payroll_date_start}
                                     onChange={(e) =>
                                         setForm({
                                             ...form,
-                                            holiday_date: e.target.value,
+                                            payroll_date_start: e.target.value,
                                         })
                                     }
                                 />
-                                {formErrors.holiday_date && (
+                                {formErrors.payroll_date_start && (
                                     <p className="text-xs text-destructive">
-                                        {formErrors.holiday_date}
+                                        {formErrors.payroll_date_start}
                                     </p>
                                 )}
                             </div>
 
-                            {/* Holiday Type */}
                             <div className="space-y-1.5">
-                                <Label>
-                                    Type{" "}
+                                <Label htmlFor="payroll_date_end">
+                                    End Date{" "}
                                     <span className="text-destructive">*</span>
                                 </Label>
-                                <Select
-                                    value={form.holiday_type}
-                                    onValueChange={(v) =>
-                                        setForm({ ...form, holiday_type: v })
+                                <Input
+                                    id="payroll_date_end"
+                                    type="date"
+                                    value={form.payroll_date_end}
+                                    min={form.payroll_date_start || undefined}
+                                    onChange={(e) =>
+                                        setForm({
+                                            ...form,
+                                            payroll_date_end: e.target.value,
+                                        })
                                     }
-                                >
-                                    <SelectTrigger>
-                                        <SelectValue placeholder="Select type" />
-                                    </SelectTrigger>
-                                    <SelectContent>
-                                        {HOLIDAY_TYPES.map((t) => (
-                                            <SelectItem key={t} value={t}>
-                                                {t}
-                                            </SelectItem>
-                                        ))}
-                                    </SelectContent>
-                                </Select>
-                                {formErrors.holiday_type && (
+                                />
+                                {formErrors.payroll_date_end && (
                                     <p className="text-xs text-destructive">
-                                        {formErrors.holiday_type}
-                                    </p>
-                                )}
-                            </div>
-
-                            {/* Color */}
-                            <div className="space-y-1.5">
-                                <Label>
-                                    Color{" "}
-                                    <span className="text-destructive">*</span>
-                                </Label>
-                                <div className="flex flex-wrap gap-2 mb-2">
-                                    {PRESET_COLORS.map((c) => (
-                                        <button
-                                            key={c.value}
-                                            type="button"
-                                            title={c.label}
-                                            onClick={() =>
-                                                setForm({
-                                                    ...form,
-                                                    color: c.value,
-                                                })
-                                            }
-                                            className={`h-7 w-7 rounded-md border-2 transition-all ${
-                                                form.color === c.value
-                                                    ? "border-primary scale-110 shadow-md"
-                                                    : "border-transparent hover:border-muted-foreground"
-                                            }`}
-                                            style={{ backgroundColor: c.value }}
-                                        />
-                                    ))}
-                                </div>
-                                <div className="flex items-center gap-2">
-                                    <input
-                                        type="color"
-                                        value={form.color}
-                                        onChange={(e) =>
-                                            setForm({
-                                                ...form,
-                                                color: e.target.value,
-                                            })
-                                        }
-                                        className="h-9 w-9 cursor-pointer rounded border border-input bg-transparent p-0.5"
-                                    />
-                                    <Input
-                                        value={form.color}
-                                        onChange={(e) =>
-                                            setForm({
-                                                ...form,
-                                                color: e.target.value,
-                                            })
-                                        }
-                                        placeholder="#EF4444"
-                                        className="font-mono uppercase flex-1"
-                                        maxLength={7}
-                                    />
-                                    <span
-                                        className="inline-block h-9 w-9 rounded border border-input flex-shrink-0"
-                                        style={{ backgroundColor: form.color }}
-                                    />
-                                </div>
-                                {formErrors.color && (
-                                    <p className="text-xs text-destructive">
-                                        {formErrors.color}
+                                        {formErrors.payroll_date_end}
                                     </p>
                                 )}
                             </div>
@@ -725,7 +570,7 @@ export default function Holiday() {
                                 {saving && (
                                     <Loader2 className="h-4 w-4 animate-spin" />
                                 )}
-                                {editTarget ? "Save Changes" : "Add Holiday"}
+                                {editTarget ? "Save Changes" : "Add Schedule"}
                             </Button>
                         </DialogFooter>
                     </DialogContent>
@@ -738,11 +583,18 @@ export default function Holiday() {
                 >
                     <AlertDialogContent>
                         <AlertDialogHeader>
-                            <AlertDialogTitle>Delete Holiday</AlertDialogTitle>
+                            <AlertDialogTitle>Delete Schedule</AlertDialogTitle>
                             <AlertDialogDescription>
-                                Are you sure you want to delete{" "}
+                                Are you sure you want to delete the cutoff
+                                schedule from{" "}
                                 <span className="font-semibold text-foreground">
-                                    {deleteTarget?.holiday_name}
+                                    {formatDate(
+                                        deleteTarget?.payroll_date_start,
+                                    )}
+                                </span>{" "}
+                                to{" "}
+                                <span className="font-semibold text-foreground">
+                                    {formatDate(deleteTarget?.payroll_date_end)}
                                 </span>
                                 ? This action cannot be undone.
                             </AlertDialogDescription>

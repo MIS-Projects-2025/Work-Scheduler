@@ -31,6 +31,12 @@ export default function NavLinks({ isSidebarOpen }) {
                 icon={<CalendarDays className="w-5 h-5" />}
                 isSidebarOpen={isSidebarOpen}
             />
+            <SidebarLink
+                href={route("payroll-cutoff-schedules.page")}
+                label="Payroll Cutoff Schedules"
+                icon={<CalendarDays className="w-5 h-5" />}
+                isSidebarOpen={isSidebarOpen}
+            />
         </nav>
     );
 }
