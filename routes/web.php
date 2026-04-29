@@ -15,6 +15,9 @@ require __DIR__ . '/general.php';
 // Work schedule routes
 require __DIR__ . '/worksched.php';
 
+// Admin routes
+require __DIR__ . '/admin.php';
+
 Route::get("/demo", [DemoController::class, 'index'])->name('demo');
 
 Route::fallback(function () {

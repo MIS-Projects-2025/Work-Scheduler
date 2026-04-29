@@ -25,6 +25,12 @@ export default function NavLinks({ isSidebarOpen }) {
                 icon={<CalendarDays className="w-5 h-5" />}
                 isSidebarOpen={isSidebarOpen}
             />
+            <SidebarLink
+                href={route("holidays.page")}
+                label="Holidays"
+                icon={<CalendarDays className="w-5 h-5" />}
+                isSidebarOpen={isSidebarOpen}
+            />
         </nav>
     );
 }
