@@ -39,4 +39,10 @@ Route::prefix('work-schedule')->name('workschedule.')->group(function () {
 
     Route::get('/remarks-history', [WorkScheduleController::class, 'getRemarksHistory'])
         ->name('remarks-history');
+    Route::get('/remarks-history/export', [WorkScheduleController::class, 'exportRemarksHistory'])
+        ->name('remarks-history.export');
+    Route::get('/export', [WorkScheduleController::class, 'exportSchedule'])
+        ->name('export');
+    Route::get('/export-ot', [WorkScheduleController::class, 'exportOt'])
+        ->name('export-ot');
 });

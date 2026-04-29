@@ -1,13 +1,5 @@
 import { useState } from "react";
 import {
-    Table,
-    TableBody,
-    TableCell,
-    TableHead,
-    TableHeader,
-    TableRow,
-} from "@/components/ui/table";
-import {
     Dialog,
     DialogContent,
     DialogHeader,
@@ -33,8 +25,9 @@ import { usePaginatedResource } from "./hooks/usePaginatedResource";
 import { useCrudDialog } from "./hooks/useCrudDialog";
 import { PageHeader } from "./components/PageHeader";
 import { DataToolbar } from "./components/DataToolbar";
-import { PaginationFooter } from "./components/PaginationFooter";
 import { DeleteConfirmDialog } from "./components/DeleteConfirmDialog";
+import ServerTable from "@/Components/ServerTable";
+import { Pagination } from "@/Components/Pagination";
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -58,12 +51,50 @@ const YEAR_OPTIONS = [
     }),
 ];
 
+// ─── Table columns ────────────────────────────────────────────────────────────
+
+function buildColumns(from, onEdit, onDelete) {
+    return [
+        {
+            key: "_row",
+            label: "#",
+            headerClassName: "w-12 pl-6",
+            className: "pl-6 text-muted-foreground text-sm",
+            render: (_, idx) => from + idx,
+        },
+        {
+            key: "payroll_date_start",
+            label: "Start Date",
+            className: "tabular-nums text-sm font-medium",
+            render: (row) => formatDate(row.payroll_date_start),
+        },
+        {
+            key: "payroll_date_end",
+            label: "End Date",
+            className: "tabular-nums text-sm",
+            render: (row) => formatDate(row.payroll_date_end),
+        },
+        {
+            key: "created_by",
+            label: "Created By",
+            className: "text-sm text-muted-foreground",
+            render: (row) => row.created_by ?? "—",
+        },
+        {
+            key: "actions",
+            label: "Actions",
+            headerClassName: "text-right pr-6",
+            className: "text-right pr-6",
+            render: (row) => <RowActions onEdit={() => onEdit(row)} onDelete={() => onDelete(row)} />,
+        },
+    ];
+}
+
 // ─── Component ────────────────────────────────────────────────────────────────
 
 export default function PayrollCutoffSchedule() {
     const [yearFilter, setYearFilter] = useState(String(currentYear));
 
-    // ── Paginated data ────────────────────────────────────────────────────────
     const {
         records,
         meta,
@@ -82,28 +113,22 @@ export default function PayrollCutoffSchedule() {
         extraFilters: { year: yearFilter },
         fetchFn: async (params) => {
             const { data: json } = await axios.get(
-                route(
-                    "payroll-cutoff-schedules.index",
-                    Object.fromEntries(params),
-                ),
+                route("payroll-cutoff-schedules.index", Object.fromEntries(params)),
             );
             return json.data;
         },
     });
 
-    // ── CRUD ──────────────────────────────────────────────────────────────────
     const crud = useCrudDialog({
         emptyForm: EMPTY_FORM,
         buildForm: (r) => ({
             payroll_date_start: r.payroll_date_start?.substring(0, 10) ?? "",
-            payroll_date_end: r.payroll_date_end?.substring(0, 10) ?? "",
+            payroll_date_end:   r.payroll_date_end?.substring(0, 10)   ?? "",
         }),
         validate: (form) => {
             const errors = {};
-            if (!form.payroll_date_start)
-                errors.payroll_date_start = "Start date is required.";
-            if (!form.payroll_date_end)
-                errors.payroll_date_end = "End date is required.";
+            if (!form.payroll_date_start) errors.payroll_date_start = "Start date is required.";
+            if (!form.payroll_date_end)   errors.payroll_date_end   = "End date is required.";
             if (
                 form.payroll_date_start &&
                 form.payroll_date_end &&
@@ -118,23 +143,19 @@ export default function PayrollCutoffSchedule() {
             toast.success("Cutoff schedule created successfully.");
         },
         onUpdate: async (target, form) => {
-            await axios.put(
-                route("payroll-cutoff-schedules.update", { id: target.ID }),
-                form,
-            );
+            await axios.put(route("payroll-cutoff-schedules.update", { id: target.ID }), form);
             toast.success("Cutoff schedule updated successfully.");
         },
         onDelete: async (target) => {
-            await axios.delete(
-                route("payroll-cutoff-schedules.destroy", { id: target.ID }),
-            );
+            await axios.delete(route("payroll-cutoff-schedules.destroy", { id: target.ID }));
             toast.success("Cutoff schedule deleted successfully.");
         },
         afterSave: refresh,
         afterDelete: pageAfterDelete,
     });
 
-    // ── Render ────────────────────────────────────────────────────────────────
+    const columns = buildColumns(from, crud.openEdit, crud.setDeleteTarget);
+
     return (
         <AuthenticatedLayout>
             <div className="p-6 space-y-6 max-w-5xl mx-auto">
@@ -148,12 +169,9 @@ export default function PayrollCutoffSchedule() {
                     <CardHeader className="pb-4">
                         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
                             <div>
-                                <CardTitle className="text-base">
-                                    Schedules
-                                </CardTitle>
+                                <CardTitle className="text-base">Schedules</CardTitle>
                                 <CardDescription>
-                                    {meta.total} record
-                                    {meta.total !== 1 ? "s" : ""}
+                                    {meta.total} record{meta.total !== 1 ? "s" : ""}
                                 </CardDescription>
                             </div>
                             <DataToolbar
@@ -166,10 +184,7 @@ export default function PayrollCutoffSchedule() {
                                 filters={[
                                     {
                                         value: yearFilter,
-                                        onChange: (v) => {
-                                            setYearFilter(v);
-                                            setPage(1);
-                                        },
+                                        onChange: (v) => { setYearFilter(v); setPage(1); },
                                         placeholder: "Year",
                                         options: YEAR_OPTIONS,
                                     },
@@ -179,99 +194,39 @@ export default function PayrollCutoffSchedule() {
                     </CardHeader>
 
                     <CardContent className="p-0">
-                        <Table>
-                            <TableHeader>
-                                <TableRow>
-                                    <TableHead className="w-12 pl-6">
-                                        #
-                                    </TableHead>
-                                    <TableHead>Start Date</TableHead>
-                                    <TableHead>End Date</TableHead>
-                                    <TableHead>Created By</TableHead>
-                                    <TableHead className="text-right pr-6">
-                                        Actions
-                                    </TableHead>
-                                </TableRow>
-                            </TableHeader>
-                            <TableBody>
-                                {loading ? (
-                                    <TableRow>
-                                        <TableCell
-                                            colSpan={5}
-                                            className="h-32 text-center text-muted-foreground"
-                                        >
-                                            <Loader2 className="inline h-5 w-5 animate-spin mr-2" />
-                                            Loading schedules...
-                                        </TableCell>
-                                    </TableRow>
-                                ) : records.length === 0 ? (
-                                    <TableRow>
-                                        <TableCell
-                                            colSpan={5}
-                                            className="h-32 text-center text-muted-foreground"
-                                        >
-                                            No schedules found.
-                                        </TableCell>
-                                    </TableRow>
-                                ) : (
-                                    records.map((r, idx) => (
-                                        <TableRow key={r.ID} className="group">
-                                            <TableCell className="pl-6 text-muted-foreground text-sm">
-                                                {from + idx}
-                                            </TableCell>
-                                            <TableCell className="tabular-nums text-sm font-medium">
-                                                {formatDate(
-                                                    r.payroll_date_start,
-                                                )}
-                                            </TableCell>
-                                            <TableCell className="tabular-nums text-sm">
-                                                {formatDate(r.payroll_date_end)}
-                                            </TableCell>
-                                            <TableCell className="text-sm text-muted-foreground">
-                                                {r.created_by ?? "—"}
-                                            </TableCell>
-                                            <TableCell className="text-right pr-6">
-                                                <RowActions
-                                                    onEdit={() =>
-                                                        crud.openEdit(r)
-                                                    }
-                                                    onDelete={() =>
-                                                        crud.setDeleteTarget(r)
-                                                    }
-                                                />
-                                            </TableCell>
-                                        </TableRow>
-                                    ))
-                                )}
-                            </TableBody>
-                        </Table>
+                        {loading ? (
+                            <div className="flex items-center justify-center h-32 text-muted-foreground">
+                                <Loader2 className="h-5 w-5 animate-spin mr-2" />
+                                Loading schedules...
+                            </div>
+                        ) : (
+                            <ServerTable
+                                columns={columns}
+                                data={records}
+                                orderBy=""
+                                orderDir="asc"
+                                onSort={() => {}}
+                                emptyMessage="No schedules found."
+                            />
+                        )}
 
-                        <PaginationFooter
+                        <Pagination
                             meta={meta}
+                            onPageChange={setPage}
                             from={from}
                             to={to}
                             perPage={perPage}
-                            onPerPageChange={(v) => {
-                                setPerPage(v);
-                                setPage(1);
-                            }}
-                            onPrev={() => setPage((p) => p - 1)}
-                            onNext={() => setPage((p) => p + 1)}
+                            onPerPageChange={(v) => { setPerPage(v); setPage(1); }}
                         />
                     </CardContent>
                 </Card>
 
                 {/* ── Create / Edit Dialog ── */}
-                <Dialog
-                    open={crud.dialogOpen}
-                    onOpenChange={crud.setDialogOpen}
-                >
+                <Dialog open={crud.dialogOpen} onOpenChange={crud.setDialogOpen}>
                     <DialogContent className="sm:max-w-md">
                         <DialogHeader>
                             <DialogTitle>
-                                {crud.editTarget
-                                    ? "Edit Schedule"
-                                    : "Add Schedule"}
+                                {crud.editTarget ? "Edit Schedule" : "Add Schedule"}
                             </DialogTitle>
                             <DialogDescription>
                                 {crud.editTarget
@@ -283,98 +238,61 @@ export default function PayrollCutoffSchedule() {
                         <div className="space-y-4 py-2">
                             <div className="space-y-1.5">
                                 <Label htmlFor="payroll_date_start">
-                                    Start Date{" "}
-                                    <span className="text-destructive">*</span>
+                                    Start Date <span className="text-destructive">*</span>
                                 </Label>
                                 <Input
                                     id="payroll_date_start"
                                     type="date"
                                     value={crud.form.payroll_date_start}
-                                    onChange={(e) =>
-                                        crud.setForm({
-                                            ...crud.form,
-                                            payroll_date_start: e.target.value,
-                                        })
-                                    }
+                                    onChange={(e) => crud.setForm({ ...crud.form, payroll_date_start: e.target.value })}
                                 />
                                 {crud.formErrors.payroll_date_start && (
-                                    <p className="text-xs text-destructive">
-                                        {crud.formErrors.payroll_date_start}
-                                    </p>
+                                    <p className="text-xs text-destructive">{crud.formErrors.payroll_date_start}</p>
                                 )}
                             </div>
 
                             <div className="space-y-1.5">
                                 <Label htmlFor="payroll_date_end">
-                                    End Date{" "}
-                                    <span className="text-destructive">*</span>
+                                    End Date <span className="text-destructive">*</span>
                                 </Label>
                                 <Input
                                     id="payroll_date_end"
                                     type="date"
                                     value={crud.form.payroll_date_end}
-                                    min={
-                                        crud.form.payroll_date_start ||
-                                        undefined
-                                    }
-                                    onChange={(e) =>
-                                        crud.setForm({
-                                            ...crud.form,
-                                            payroll_date_end: e.target.value,
-                                        })
-                                    }
+                                    min={crud.form.payroll_date_start || undefined}
+                                    onChange={(e) => crud.setForm({ ...crud.form, payroll_date_end: e.target.value })}
                                 />
                                 {crud.formErrors.payroll_date_end && (
-                                    <p className="text-xs text-destructive">
-                                        {crud.formErrors.payroll_date_end}
-                                    </p>
+                                    <p className="text-xs text-destructive">{crud.formErrors.payroll_date_end}</p>
                                 )}
                             </div>
                         </div>
 
                         <DialogFooter className="gap-2">
-                            <Button
-                                variant="outline"
-                                onClick={() => crud.setDialogOpen(false)}
-                                disabled={crud.saving}
-                            >
+                            <Button variant="outline" onClick={() => crud.setDialogOpen(false)} disabled={crud.saving}>
                                 Cancel
                             </Button>
-                            <Button
-                                onClick={crud.handleSave}
-                                disabled={crud.saving}
-                                className="gap-1.5"
-                            >
-                                {crud.saving && (
-                                    <Loader2 className="h-4 w-4 animate-spin" />
-                                )}
-                                {crud.editTarget
-                                    ? "Save Changes"
-                                    : "Add Schedule"}
+                            <Button onClick={crud.handleSave} disabled={crud.saving} className="gap-1.5">
+                                {crud.saving && <Loader2 className="h-4 w-4 animate-spin" />}
+                                {crud.editTarget ? "Save Changes" : "Add Schedule"}
                             </Button>
                         </DialogFooter>
                     </DialogContent>
                 </Dialog>
 
-                {/* ── Delete Confirm ── */}
                 <DeleteConfirmDialog
                     open={!!crud.deleteTarget}
                     onOpenChange={(o) => !o && crud.setDeleteTarget(null)}
                     title="Delete Schedule"
                     description={
                         <>
-                            Are you sure you want to delete the cutoff schedule
-                            from{" "}
+                            Are you sure you want to delete the cutoff schedule from{" "}
                             <span className="font-semibold text-foreground">
-                                {formatDate(
-                                    crud.deleteTarget?.payroll_date_start,
-                                )}
+                                {formatDate(crud.deleteTarget?.payroll_date_start)}
                             </span>{" "}
                             to{" "}
                             <span className="font-semibold text-foreground">
-                                {formatDate(
-                                    crud.deleteTarget?.payroll_date_end,
-                                )}
+                                {formatDate(crud.deleteTarget?.payroll_date_end)}
                             </span>
                             ? This action cannot be undone.
                         </>
@@ -390,12 +308,7 @@ export default function PayrollCutoffSchedule() {
 function RowActions({ onEdit, onDelete }) {
     return (
         <div className="flex justify-end gap-1">
-            <Button
-                variant="ghost"
-                size="icon"
-                className="h-8 w-8"
-                onClick={onEdit}
-            >
+            <Button variant="ghost" size="icon" className="h-8 w-8" onClick={onEdit}>
                 <Pencil className="h-3.5 w-3.5" />
             </Button>
             <Button

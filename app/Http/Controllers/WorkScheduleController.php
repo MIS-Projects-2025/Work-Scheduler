@@ -3,6 +3,9 @@
 namespace App\Http\Controllers;
 
 use App\Exports\WorkScheduleTemplateExport;
+use App\Exports\RemarksHistoryExport;
+use App\Exports\WorkScheduleDataExport;
+use App\Exports\WorkScheduleOtExport;
 use App\Models\WorkSchedule;
 use App\Services\WorkScheduleService;
 use Maatwebsite\Excel\Facades\Excel;
@@ -284,35 +287,101 @@ class WorkScheduleController extends Controller
 
 
     /**
-     * Get remarks history for a cutoff period (HR admin only)
+     * Get paginated + searchable remarks history for a cutoff period (HR admin only).
      */
     public function getRemarksHistory(Request $request)
     {
         try {
             $validated = $request->validate([
                 'date_start' => 'required|date',
-                'date_end' => 'required|date',
+                'date_end'   => 'required|date',
+                'search'     => 'nullable|string|max:100',
+                'page'       => 'nullable|integer|min:1',
+                'per_page'   => 'nullable|integer|in:10,20,50,100',
             ]);
 
-            // Authorization check
-            $isHrAdmin = (string) session('emp_data.emp_system_role') === 'hr_admin';
-            if (!$isHrAdmin) {
+            if ((string) session('emp_data.emp_system_role') !== 'hr_admin') {
                 return response()->json(['error' => 'Unauthorized'], 403);
             }
 
-            // Delegate to service
-            $history = $this->service->getRemarksHistoryForHr(
+            $result = $this->service->getRemarksHistoryPaginated(
                 $validated['date_start'],
-                $validated['date_end']
+                $validated['date_end'],
+                $validated['search']   ?? '',
+                (int) ($validated['page']     ?? 1),
+                (int) ($validated['per_page'] ?? 20)
             );
 
-            return response()->json($history);
+            // Remove internal key before sending to client
+            unset($result['_all_history']);
+
+            return response()->json($result);
         } catch (\Illuminate\Validation\ValidationException $e) {
             return response()->json(['error' => $e->errors()], 422);
         } catch (\Exception $e) {
             Log::error('Failed to fetch remarks history: ' . $e->getMessage());
             return response()->json(['error' => 'Failed to fetch remarks history'], 500);
         }
+    }
+
+    /**
+     * Export all remarks history for a cutoff as Excel (HR admin only).
+     */
+    public function exportRemarksHistory(Request $request)
+    {
+        $request->validate(['date_start' => 'required|date', 'date_end' => 'required|date']);
+
+        if ((string) session('emp_data.emp_system_role') !== 'hr_admin') {
+            abort(403);
+        }
+
+        $dateStart = $request->input('date_start');
+        $dateEnd   = $request->input('date_end');
+        $history   = $this->service->getAllRemarksHistoryForExport($dateStart, $dateEnd);
+
+        $filename = 'remarks_history_' . str_replace('-', '', $dateStart) . '_' . str_replace('-', '', $dateEnd) . '.xlsx';
+
+        return Excel::download(new RemarksHistoryExport($history, $dateStart, $dateEnd), $filename);
+    }
+
+    /**
+     * Export all schedule data for a cutoff as Excel (HR admin only).
+     */
+    public function exportSchedule(Request $request)
+    {
+        $request->validate(['date_start' => 'required|date', 'date_end' => 'required|date']);
+
+        if ((string) session('emp_data.emp_system_role') !== 'hr_admin') {
+            abort(403);
+        }
+
+        $dateStart = $request->input('date_start');
+        $dateEnd   = $request->input('date_end');
+        $data      = $this->service->getScheduleExportData($dateStart, $dateEnd);
+
+        $filename = 'work_schedule_' . str_replace('-', '', $dateStart) . '_' . str_replace('-', '', $dateEnd) . '.xlsx';
+
+        return Excel::download(new WorkScheduleDataExport($data), $filename);
+    }
+
+    /**
+     * Export OT hours per employee for a cutoff (HR admin only).
+     */
+    public function exportOt(Request $request)
+    {
+        $request->validate(['date_start' => 'required|date', 'date_end' => 'required|date']);
+
+        if ((string) session('emp_data.emp_system_role') !== 'hr_admin') {
+            abort(403);
+        }
+
+        $dateStart = $request->input('date_start');
+        $dateEnd   = $request->input('date_end');
+        $rows      = $this->service->getOtExportData($dateStart, $dateEnd);
+
+        $filename = 'ot_export_' . str_replace('-', '', $dateStart) . '_' . str_replace('-', '', $dateEnd) . '.xlsx';
+
+        return Excel::download(new WorkScheduleOtExport($rows, $dateStart, $dateEnd), $filename);
     }
 
     private function validateRequest(Request $request, $requireRemarks = false)

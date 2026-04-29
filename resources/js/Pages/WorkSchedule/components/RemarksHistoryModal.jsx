@@ -1,4 +1,5 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback } from "react";
+import { useDebounce } from "../hooks/useDebounce";
 import {
     Dialog,
     DialogContent,
@@ -6,19 +7,83 @@ import {
     DialogTitle,
 } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
-import { ScrollArea } from "@/components/ui/scroll-area";
+import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
 import {
-    Table,
-    TableBody,
-    TableCell,
-    TableHead,
-    TableHeader,
-    TableRow,
-} from "@/components/ui/table";
-import { Loader2, Clock, User, FileText, RefreshCw } from "lucide-react";
+    Select,
+    SelectContent,
+    SelectItem,
+    SelectTrigger,
+    SelectValue,
+} from "@/components/ui/select";
+import { Loader2, Clock, User, FileText, RefreshCw, Download, Search } from "lucide-react";
 import dayjs from "dayjs";
-import { router } from "@inertiajs/react";
+import ServerTable from "@/Components/ServerTable";
+import { Pagination } from "@/Components/Pagination";
+
+const PAGE_SIZES = [10, 20, 50, 100];
+
+const OPERATION_CONFIG = {
+    CREATE:      { label: "Created",      color: "bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-300" },
+    UPDATE:      { label: "Updated",      color: "bg-blue-100 text-blue-800 dark:bg-blue-900 dark:text-blue-300" },
+    DELETE:      { label: "Deleted",      color: "bg-red-100 text-red-800 dark:bg-red-900 dark:text-red-300" },
+    APPROVE:     { label: "Approved",     color: "bg-purple-100 text-purple-800 dark:bg-purple-900 dark:text-purple-300" },
+    DISAPPROVE:  { label: "Disapproved",  color: "bg-orange-100 text-orange-800 dark:bg-orange-900 dark:text-orange-300" },
+    ACKNOWLEDGE: { label: "Acknowledged", color: "bg-teal-100 text-teal-800 dark:bg-teal-900 dark:text-teal-300" },
+};
+
+function OperationBadge({ operation }) {
+    const cfg = OPERATION_CONFIG[operation] ?? OPERATION_CONFIG.UPDATE;
+    return <Badge className={cfg.color}>{cfg.label}</Badge>;
+}
+
+const COLUMNS = [
+    {
+        key: "emp_name",
+        label: "Employee",
+        render: (row) => (
+            <div>
+                <div className="font-medium text-sm">{row.emp_name}</div>
+                <div className="text-xs text-muted-foreground">{row.emp_id}</div>
+            </div>
+        ),
+    },
+    {
+        key: "operation",
+        label: "Operation",
+        render: (row) => <OperationBadge operation={row.operation} />,
+    },
+    {
+        key: "old_remarks",
+        label: "Old Remarks",
+        className: "max-w-[180px]",
+        render: (row) => (
+            <span className="block truncate" title={row.old_remarks}>
+                {row.old_remarks || "—"}
+            </span>
+        ),
+    },
+    {
+        key: "new_remarks",
+        label: "New Remarks",
+        className: "max-w-[180px]",
+        render: (row) => (
+            <span className="block truncate" title={row.new_remarks}>
+                {row.new_remarks || "—"}
+            </span>
+        ),
+    },
+    {
+        key: "updated_by_name",
+        label: "Updated By",
+    },
+    {
+        key: "updated_at",
+        label: "Date",
+        className: "whitespace-nowrap",
+        render: (row) => dayjs(row.updated_at).format("MMM D, YYYY h:mm A"),
+    },
+];
 
 export default function RemarksHistoryModal({
     open,
@@ -27,294 +92,206 @@ export default function RemarksHistoryModal({
     dateEnd,
     cutoffLabel,
 }) {
-    const [loading, setLoading] = useState(false);
-    const [history, setHistory] = useState(null);
-    const [activeTab, setActiveTab] = useState("all");
-    const [error, setError] = useState(null);
+    const [loading, setLoading]       = useState(false);
+    const [data, setData]             = useState([]);
+    const [summary, setSummary]       = useState(null);
+    const [pagination, setPagination] = useState(null);
+    const [error, setError]           = useState(null);
 
+    const [search, setSearch]   = useState("");
+    const [page, setPage]       = useState(1);
+    const [perPage, setPerPage] = useState(20);
+
+    const debouncedSearch = useDebounce(search, 350);
+
+    // Reset to page 1 when search changes
     useEffect(() => {
-        if (open && dateStart && dateEnd) {
-            fetchRemarksHistory();
-        }
-    }, [open, dateStart, dateEnd]);
+        setPage(1);
+    }, [debouncedSearch]);
 
-    const fetchRemarksHistory = async () => {
+    const fetchHistory = useCallback(async () => {
+        if (!dateStart || !dateEnd) return;
         setLoading(true);
         setError(null);
-
         try {
-            // Use the named route - this will generate the correct URL
-            const url = route("workschedule.remarks-history", {
+            const params = new URLSearchParams({
                 date_start: dateStart,
-                date_end: dateEnd,
+                date_end:   dateEnd,
+                page:       String(page),
+                per_page:   String(perPage),
             });
+            if (debouncedSearch) params.set("search", debouncedSearch);
 
-            console.log("Fetching from URL:", url);
-
-            const response = await fetch(url, {
-                headers: {
-                    Accept: "application/json",
-                    "X-Requested-With": "XMLHttpRequest",
-                },
-            });
-
-            if (!response.ok) {
-                throw new Error(
-                    `HTTP ${response.status}: ${response.statusText}`,
-                );
-            }
-
-            const data = await response.json();
-            console.log("Received data:", data);
-            setHistory(data);
-        } catch (error) {
-            console.error("Failed to fetch remarks history:", error);
-            setError(error.message);
+            const res = await fetch(
+                route("workschedule.remarks-history") + "?" + params.toString(),
+                { headers: { Accept: "application/json", "X-Requested-With": "XMLHttpRequest" } }
+            );
+            if (!res.ok) throw new Error(`HTTP ${res.status}`);
+            const json = await res.json();
+            setData(json.data ?? []);
+            setSummary(json.summary ?? null);
+            setPagination(json.pagination ?? null);
+        } catch (err) {
+            setError(err.message);
         } finally {
             setLoading(false);
         }
+    }, [dateStart, dateEnd, page, perPage, debouncedSearch]);
+
+    // Fetch when modal opens or params change
+    useEffect(() => {
+        if (open) fetchHistory();
+    }, [open, fetchHistory]);
+
+    // Reset state when modal closes
+    useEffect(() => {
+        if (!open) {
+            setSearch("");
+            setPage(1);
+            setPerPage(20);
+            setData([]);
+            setSummary(null);
+            setPagination(null);
+            setError(null);
+        }
+    }, [open]);
+
+    const handleExport = () => {
+        const params = new URLSearchParams({ date_start: dateStart, date_end: dateEnd });
+        window.location.href = route("workschedule.remarks-history.export") + "?" + params.toString();
     };
 
-    const getOperationBadge = (operation) => {
-        const variants = {
-            CREATE: {
-                label: "Created",
-                color: "bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-300",
-            },
-            UPDATE: {
-                label: "Updated",
-                color: "bg-blue-100 text-blue-800 dark:bg-blue-900 dark:text-blue-300",
-            },
-            DELETE: {
-                label: "Deleted",
-                color: "bg-red-100 text-red-800 dark:bg-red-900 dark:text-red-300",
-            },
-            APPROVE: {
-                label: "Approved",
-                color: "bg-purple-100 text-purple-800 dark:bg-purple-900 dark:text-purple-300",
-            },
-            DISAPPROVE: {
-                label: "Disapproved",
-                color: "bg-orange-100 text-orange-800 dark:bg-orange-900 dark:text-orange-300",
-            },
-            ACKNOWLEDGE: {
-                label: "Acknowledged",
-                color: "bg-teal-100 text-teal-800 dark:bg-teal-900 dark:text-teal-300",
-            },
-        };
-
-        const config = variants[operation] || variants["UPDATE"];
-        return <Badge className={config.color}>{config.label}</Badge>;
-    };
-
-    const formatDate = (date) => {
-        return dayjs(date).format("MMM D, YYYY h:mm A");
-    };
-
-    const renderAllHistory = () => (
-        <ScrollArea className="h-[500px]">
-            <Table>
-                <TableHeader className="sticky top-0 bg-background">
-                    <TableRow>
-                        <TableHead>Employee</TableHead>
-                        <TableHead>Operation</TableHead>
-                        <TableHead>Old Remarks</TableHead>
-                        <TableHead>New Remarks</TableHead>
-                        <TableHead>Updated By</TableHead>
-                        <TableHead>Date</TableHead>
-                    </TableRow>
-                </TableHeader>
-                <TableBody>
-                    {history?.all_history?.map((item) => (
-                        <TableRow key={item.history_id}>
-                            <TableCell className="font-medium">
-                                {item.emp_name}
-                            </TableCell>
-                            <TableCell>
-                                {getOperationBadge(item.operation)}
-                            </TableCell>
-                            <TableCell
-                                className="max-w-[200px] truncate"
-                                title={item.old_remarks}
-                            >
-                                {item.old_remarks || "—"}
-                            </TableCell>
-                            <TableCell
-                                className="max-w-[200px] truncate"
-                                title={item.new_remarks}
-                            >
-                                {item.new_remarks || "—"}
-                            </TableCell>
-                            <TableCell>{item.updated_by_name}</TableCell>
-                            <TableCell className="whitespace-nowrap">
-                                {formatDate(item.updated_at)}
-                            </TableCell>
-                        </TableRow>
-                    ))}
-                </TableBody>
-            </Table>
-        </ScrollArea>
-    );
-
-    const renderGroupedByEmployee = () => (
-        <ScrollArea className="h-[500px]">
-            <div className="space-y-6">
-                {history?.grouped_by_employee?.map((employee) => (
-                    <div key={employee.emp_id} className="border rounded-lg">
-                        <div className="p-4 bg-muted/50 border-b">
-                            <h3 className="font-semibold text-lg">
-                                {employee.emp_name}
-                            </h3>
-                            <p className="text-sm text-muted-foreground">
-                                ID: {employee.emp_id}
-                            </p>
-                        </div>
-                        <Table>
-                            <TableHeader>
-                                <TableRow>
-                                    <TableHead>Operation</TableHead>
-                                    <TableHead>Old Remarks</TableHead>
-                                    <TableHead>New Remarks</TableHead>
-                                    <TableHead>Updated By</TableHead>
-                                    <TableHead>Date</TableHead>
-                                </TableRow>
-                            </TableHeader>
-                            <TableBody>
-                                {employee.history.map((item) => (
-                                    <TableRow key={item.history_id}>
-                                        <TableCell>
-                                            {getOperationBadge(item.operation)}
-                                        </TableCell>
-                                        <TableCell
-                                            className="max-w-[200px] truncate"
-                                            title={item.old_remarks}
-                                        >
-                                            {item.old_remarks || "—"}
-                                        </TableCell>
-                                        <TableCell
-                                            className="max-w-[200px] truncate"
-                                            title={item.new_remarks}
-                                        >
-                                            {item.new_remarks || "—"}
-                                        </TableCell>
-                                        <TableCell>
-                                            {item.updated_by_name}
-                                        </TableCell>
-                                        <TableCell className="whitespace-nowrap">
-                                            {formatDate(item.updated_at)}
-                                        </TableCell>
-                                    </TableRow>
-                                ))}
-                            </TableBody>
-                        </Table>
-                    </div>
-                ))}
-            </div>
-        </ScrollArea>
-    );
-
-    const renderSummary = () => (
-        <div className="grid grid-cols-3 gap-4 mb-6">
-            <div className="bg-primary/10 rounded-lg p-4 text-center">
-                <FileText className="w-8 h-8 mx-auto mb-2 text-primary" />
-                <div className="text-2xl font-bold">{history?.total || 0}</div>
-                <div className="text-sm text-muted-foreground">
-                    Total Changes
-                </div>
-            </div>
-            <div className="bg-green-100 dark:bg-green-900/20 rounded-lg p-4 text-center">
-                <User className="w-8 h-8 mx-auto mb-2 text-green-600 dark:text-green-400" />
-                <div className="text-2xl font-bold">
-                    {history?.grouped_by_employee?.length || 0}
-                </div>
-                <div className="text-sm text-muted-foreground">
-                    Employees Affected
-                </div>
-            </div>
-            <div className="bg-blue-100 dark:bg-blue-900/20 rounded-lg p-4 text-center">
-                <Clock className="w-8 h-8 mx-auto mb-2 text-blue-600 dark:text-blue-400" />
-                <div className="text-sm font-mono">
-                    {history?.all_history?.[0]?.updated_at
-                        ? formatDate(history.all_history[0].updated_at)
-                        : "No changes"}
-                </div>
-                <div className="text-sm text-muted-foreground">
-                    Latest Change
-                </div>
-            </div>
-        </div>
-    );
+    const paginationMeta = pagination
+        ? {
+              current_page: pagination.current_page,
+              last_page:    pagination.last_page,
+              from:         pagination.from,
+              to:           pagination.to,
+              total:        pagination.total,
+              per_page:     pagination.per_page,
+          }
+        : null;
 
     return (
         <Dialog open={open} onOpenChange={onClose}>
-            <DialogContent className="max-w-5xl max-h-[90vh] flex flex-col">
-                <DialogHeader>
-                    <DialogTitle className="flex items-center justify-between">
-                        <span>Remarks History - {cutoffLabel}</span>
-                        <Button
-                            variant="outline"
-                            size="sm"
-                            onClick={fetchRemarksHistory}
-                            disabled={loading}
-                        >
-                            <RefreshCw
-                                className={`w-4 h-4 mr-2 ${loading ? "animate-spin" : ""}`}
-                            />
-                            Refresh
-                        </Button>
+            <DialogContent className="max-w-5xl max-h-[90vh] flex flex-col overflow-hidden">
+                <DialogHeader className="shrink-0">
+                    <DialogTitle className="flex items-center justify-between flex-wrap gap-2">
+                        <span>Remarks History — {cutoffLabel}</span>
+                        <div className="flex items-center gap-2">
+                            <Button
+                                variant="outline"
+                                size="sm"
+                                onClick={handleExport}
+                                disabled={loading}
+                            >
+                                <Download className="w-4 h-4 mr-1.5" />
+                                Export
+                            </Button>
+                            <Button
+                                variant="outline"
+                                size="sm"
+                                onClick={fetchHistory}
+                                disabled={loading}
+                            >
+                                <RefreshCw className={`w-4 h-4 mr-1.5 ${loading ? "animate-spin" : ""}`} />
+                                Refresh
+                            </Button>
+                        </div>
                     </DialogTitle>
                 </DialogHeader>
 
-                {loading ? (
-                    <div className="flex items-center justify-center py-12">
-                        <Loader2 className="w-8 h-8 animate-spin text-primary" />
-                        <span className="ml-2">Loading history...</span>
+                {/* Summary cards */}
+                {summary && (
+                    <div className="grid grid-cols-3 gap-3 shrink-0">
+                        <div className="bg-primary/10 rounded-lg p-3 text-center">
+                            <FileText className="w-6 h-6 mx-auto mb-1 text-primary" />
+                            <div className="text-xl font-bold">{summary.total_changes}</div>
+                            <div className="text-xs text-muted-foreground">Total Changes</div>
+                        </div>
+                        <div className="bg-green-100 dark:bg-green-900/20 rounded-lg p-3 text-center">
+                            <User className="w-6 h-6 mx-auto mb-1 text-green-600 dark:text-green-400" />
+                            <div className="text-xl font-bold">{summary.employees_affected}</div>
+                            <div className="text-xs text-muted-foreground">Employees Affected</div>
+                        </div>
+                        <div className="bg-blue-100 dark:bg-blue-900/20 rounded-lg p-3 text-center">
+                            <Clock className="w-6 h-6 mx-auto mb-1 text-blue-600 dark:text-blue-400" />
+                            <div className="text-xs font-mono">
+                                {summary.latest_change
+                                    ? dayjs(summary.latest_change).format("MMM D, YYYY h:mm A")
+                                    : "No changes"}
+                            </div>
+                            <div className="text-xs text-muted-foreground">Latest Change</div>
+                        </div>
                     </div>
-                ) : error ? (
-                    <div className="text-center py-12 text-red-600">
-                        <FileText className="w-12 h-12 mx-auto mb-3 opacity-50" />
-                        <p>Error: {error}</p>
-                        <Button
-                            variant="outline"
-                            onClick={fetchRemarksHistory}
-                            className="mt-4"
-                        >
-                            Try Again
-                        </Button>
-                    </div>
-                ) : history && history.total > 0 ? (
-                    <>
-                        {renderSummary()}
+                )}
 
-                        <div className="flex gap-2 mb-4 border-b">
-                            <Button
-                                variant={
-                                    activeTab === "all" ? "default" : "ghost"
-                                }
-                                onClick={() => setActiveTab("all")}
-                            >
-                                All History
-                            </Button>
-                            <Button
-                                variant={
-                                    activeTab === "grouped"
-                                        ? "default"
-                                        : "ghost"
-                                }
-                                onClick={() => setActiveTab("grouped")}
-                            >
-                                Group by Employee
+                {/* Search + page size controls */}
+                <div className="flex items-center justify-between gap-3 shrink-0 flex-wrap">
+                    <div className="relative w-64">
+                        <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
+                        <Input
+                            placeholder="Search by ID, name, or updated by..."
+                            value={search}
+                            onChange={(e) => setSearch(e.target.value)}
+                            className="pl-8 h-8 text-sm"
+                        />
+                    </div>
+                    <div className="flex items-center gap-2 text-sm text-muted-foreground">
+                        <span>Show</span>
+                        <Select
+                            value={String(perPage)}
+                            onValueChange={(v) => {
+                                setPerPage(Number(v));
+                                setPage(1);
+                            }}
+                        >
+                            <SelectTrigger className="w-20 h-8">
+                                <SelectValue />
+                            </SelectTrigger>
+                            <SelectContent>
+                                {PAGE_SIZES.map((n) => (
+                                    <SelectItem key={n} value={String(n)}>
+                                        {n}
+                                    </SelectItem>
+                                ))}
+                            </SelectContent>
+                        </Select>
+                        <span>entries</span>
+                    </div>
+                </div>
+
+                {/* Table area */}
+                <div className="flex-1 overflow-y-auto min-h-0">
+                    {loading ? (
+                        <div className="flex items-center justify-center py-12">
+                            <Loader2 className="w-7 h-7 animate-spin text-primary" />
+                            <span className="ml-2 text-muted-foreground">Loading...</span>
+                        </div>
+                    ) : error ? (
+                        <div className="text-center py-12 text-destructive">
+                            <FileText className="w-10 h-10 mx-auto mb-3 opacity-50" />
+                            <p className="text-sm">{error}</p>
+                            <Button variant="outline" onClick={fetchHistory} className="mt-4">
+                                Try Again
                             </Button>
                         </div>
+                    ) : (
+                        <ServerTable
+                            columns={COLUMNS}
+                            data={data}
+                            orderBy=""
+                            orderDir="asc"
+                            onSort={() => {}}
+                            emptyMessage="No remarks history found for this cutoff period."
+                        />
+                    )}
+                </div>
 
-                        {activeTab === "all"
-                            ? renderAllHistory()
-                            : renderGroupedByEmployee()}
-                    </>
-                ) : (
-                    <div className="text-center py-12 text-muted-foreground">
-                        <FileText className="w-12 h-12 mx-auto mb-3 opacity-50" />
-                        <p>No remarks history found for this cutoff period.</p>
+                {/* Pagination */}
+                {paginationMeta && paginationMeta.last_page > 1 && (
+                    <div className="shrink-0">
+                        <Pagination meta={paginationMeta} onPageChange={setPage} />
                     </div>
                 )}
             </DialogContent>

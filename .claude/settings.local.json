@@ -5,7 +5,9 @@
       "Bash(npx vite:*)",
       "Bash(php -l app/Http/Controllers/WorkScheduleController.php)",
       "Bash(php -l app/Services/WorkScheduleService.php)",
-      "Bash(php -l app/Repositories/WorkScheduleRepository.php)"
+      "Bash(php -l app/Repositories/WorkScheduleRepository.php)",
+      "Bash(grep -E \"\\\\.\\(js|jsx\\)$\")",
+      "Bash(grep -E \"\\\\.jsx$\")"
     ]
   }
 }

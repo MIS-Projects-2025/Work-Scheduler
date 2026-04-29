@@ -707,67 +707,186 @@ class WorkScheduleService
     }
 
 
+    /**
+     * @deprecated Use getRemarksHistoryPaginated
+     */
     public function getRemarksHistoryForHr(string $dateStart, string $dateEnd): array
     {
-        // Add debug logging
-        Log::info('Fetching remarks history for HR', [
-            'date_start' => $dateStart,
-            'date_end' => $dateEnd
-        ]);
+        $result = $this->getRemarksHistoryPaginated($dateStart, $dateEnd, '', 1, 9999);
+        return [
+            'total'               => $result['summary']['total_changes'],
+            'grouped_by_employee' => $this->groupRemarksHistoryByEmployee($result['_all_history'] ?? []),
+            'all_history'         => $result['_all_history'] ?? [],
+        ];
+    }
 
+    /**
+     * Paginated + searchable remarks history for HR admin modal.
+     */
+    public function getRemarksHistoryPaginated(
+        string $dateStart,
+        string $dateEnd,
+        string $search  = '',
+        int    $page    = 1,
+        int    $perPage = 20
+    ): array {
         $schedules = $this->repo->getWorkSchedulesWithRemarksHistory($dateStart, $dateEnd);
 
-        Log::info('Schedules found', [
-            'count' => $schedules->count(),
-            'schedule_ids' => $schedules->pluck('id')->toArray()
-        ]);
+        $empty = [
+            'data'       => [],
+            'summary'    => ['total_changes' => 0, 'employees_affected' => 0, 'latest_change' => null],
+            'pagination' => ['current_page' => 1, 'last_page' => 1, 'per_page' => $perPage, 'total' => 0, 'from' => 0, 'to' => 0],
+        ];
 
         if ($schedules->isEmpty()) {
-            return ['total' => 0, 'grouped_by_employee' => [], 'all_history' => []];
+            return $empty;
         }
 
-        // Check if remarks history is loaded
-        foreach ($schedules as $schedule) {
-            Log::info('Schedule ID: ' . $schedule->id . ' has remarks history count: ' . $schedule->remarksHistory->count());
-        }
-
-        // Collect all unique employee IDs
         $allIds = $schedules->pluck('emp_id')
             ->merge($schedules->flatMap(fn($s) => $s->remarksHistory->pluck('updated_by')))
-            ->unique()
-            ->values()
-            ->toArray();
+            ->unique()->values()->toArray();
 
-        Log::info('Employee IDs to fetch', ['ids' => $allIds]);
-
-        // Fetch names once
         $employeeNames = $this->getEmployeeNamesBulk($allIds);
 
-        // Build history array
         $history = [];
         foreach ($schedules as $schedule) {
             foreach ($schedule->remarksHistory as $record) {
                 $history[] = [
-                    'history_id' => $record->history_id,
-                    'emp_id' => $schedule->emp_id,
-                    'emp_name' => $employeeNames[$schedule->emp_id] ?? $record->empname ?? 'Unknown',
-                    'old_remarks' => $record->old_remarks,
-                    'new_remarks' => $record->new_remarks,
-                    'operation' => $record->operation,
-                    'updated_at' => $record->updated_at,
-                    'updated_by' => $record->updated_by,
+                    'history_id'      => $record->history_id,
+                    'emp_id'          => $schedule->emp_id,
+                    'emp_name'        => $employeeNames[$schedule->emp_id] ?? $record->empname ?? 'Unknown',
+                    'old_remarks'     => $record->old_remarks,
+                    'new_remarks'     => $record->new_remarks,
+                    'operation'       => $record->operation,
+                    'updated_at'      => (string) $record->updated_at,
+                    'updated_by'      => $record->updated_by,
                     'updated_by_name' => $employeeNames[$record->updated_by] ?? $record->updated_by,
                 ];
             }
         }
 
-        Log::info('History entries built', ['count' => count($history)]);
+        // Sort newest first
+        usort($history, fn($a, $b) => strtotime($b['updated_at']) - strtotime($a['updated_at']));
+
+        // Summary stats based on ALL data (before search filter)
+        $totalChanges      = count($history);
+        $employeesAffected = count(array_unique(array_column($history, 'emp_id')));
+        $latestChange      = $history[0]['updated_at'] ?? null;
+
+        // Apply search filter
+        if (!empty($search)) {
+            $q = strtolower($search);
+            $history = array_values(array_filter($history, fn($i) =>
+                str_contains(strtolower((string) $i['emp_id']), $q) ||
+                str_contains(strtolower($i['emp_name']), $q) ||
+                str_contains(strtolower($i['updated_by_name']), $q)
+            ));
+        }
+
+        $total    = count($history);
+        $offset   = ($page - 1) * $perPage;
+        $lastPage = max(1, (int) ceil($total / $perPage));
+        $from     = $total > 0 ? $offset + 1 : 0;
+        $to       = min($offset + $perPage, $total);
 
         return [
-            'total' => count($history),
-            'grouped_by_employee' => $this->groupRemarksHistoryByEmployee($history),
-            'all_history' => $history,
+            'data'        => array_values(array_slice($history, $offset, $perPage)),
+            '_all_history' => $history, // internal use by deprecated method
+            'summary'     => [
+                'total_changes'      => $totalChanges,
+                'employees_affected' => $employeesAffected,
+                'latest_change'      => $latestChange,
+            ],
+            'pagination'  => [
+                'current_page' => $page,
+                'last_page'    => $lastPage,
+                'per_page'     => $perPage,
+                'total'        => $total,
+                'from'         => $from,
+                'to'           => $to,
+            ],
         ];
+    }
+
+    /**
+     * All remarks history for a cutoff period (for export, no pagination).
+     */
+    public function getAllRemarksHistoryForExport(string $dateStart, string $dateEnd): array
+    {
+        $result = $this->getRemarksHistoryPaginated($dateStart, $dateEnd, '', 1, 9999);
+        return $result['_all_history'] ?? [];
+    }
+
+    /**
+     * All schedule data for a cutoff period (for export).
+     */
+    public function getScheduleExportData(string $dateStart, string $dateEnd): array
+    {
+        $schedules   = $this->repo->getAllSchedulesWithDaysForExport($dateStart, $dateEnd);
+        $employeeIds = $schedules->pluck('emp_id')->unique()->values()->toArray();
+        $employees   = empty($employeeIds) ? [] : $this->hris->fetchEmployeesBulk($employeeIds);
+        $days        = $this->buildDateRange($dateStart, $dateEnd);
+
+        $statusLabels = [
+            WorkSchedule::STATUS_PENDING_APPROVAL => 'For Approval',
+            WorkSchedule::STATUS_APPROVED         => 'Approved',
+            WorkSchedule::STATUS_ACKNOWLEDGED     => 'Acknowledged',
+            WorkSchedule::STATUS_DISAPPROVED      => 'Disapproved',
+        ];
+
+        $rows = [];
+        foreach ($schedules as $schedule) {
+            $daysMap = [];
+            foreach ($schedule->days as $day) {
+                $daysMap[$day->work_date] = $day->shiftCode?->shiftcode ?? '';
+            }
+
+            $empData = $employees[$schedule->emp_id] ?? [];
+            $row = [
+                'emp_id'     => $schedule->emp_id,
+                'emp_name'   => $empData['emp_name']   ?? '',
+                'department' => $empData['department'] ?? '',
+                'prodline'   => $empData['prodline']   ?? '',
+                'status'     => $statusLabels[(int) $schedule->work_sched_status] ?? 'Unknown',
+            ];
+
+            foreach ($days as $date) {
+                $row[$date] = $daysMap[$date] ?? '';
+            }
+
+            $rows[] = $row;
+        }
+
+        return ['rows' => $rows, 'days' => $days, 'date_start' => $dateStart, 'date_end' => $dateEnd];
+    }
+
+    /**
+     * OT export: one row per employee with total approved OT hours for the cutoff.
+     */
+    public function getOtExportData(string $dateStart, string $dateEnd): array
+    {
+        $schedules = $this->repo->getApprovedSchedulesWithOtDays($dateStart, $dateEnd);
+
+        $rows = [];
+        foreach ($schedules as $schedule) {
+            $otHours = 0.0;
+            foreach ($schedule->days as $day) {
+                if ($day->shiftCode && (float) ($day->shiftCode->ot_hrs ?? 0) > 0) {
+                    $otHours += (float) $day->shiftCode->ot_hrs;
+                }
+            }
+
+            if ($otHours > 0) {
+                $rows[] = [
+                    'EmpCode'            => $schedule->emp_id,
+                    'DateFrom'           => $dateStart,
+                    'DateTo'             => $dateEnd,
+                    'NumOTHoursApproved' => $otHours,
+                ];
+            }
+        }
+
+        return $rows;
     }
     /**
      * Bulk fetch employee names from HRIS (business logic)

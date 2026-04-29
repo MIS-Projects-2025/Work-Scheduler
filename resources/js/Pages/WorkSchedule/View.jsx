@@ -1,5 +1,3 @@
-// In WorkScheduleView.jsx
-
 import AuthenticatedLayout from "@/Layouts/AuthenticatedLayout";
 import { Head } from "@inertiajs/react";
 import dayjs from "dayjs";
@@ -10,6 +8,7 @@ import {
     RotateCcw,
     Save,
     Clock,
+    Download,
 } from "lucide-react";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -134,17 +133,43 @@ export default function WorkScheduleView({
                         <div className="px-4 py-2 flex items-center justify-between gap-3 border-b flex-wrap">
                             {/* Left: remarks history button for HR + acknowledge / bulk approve-disapprove */}
                             <div className="flex items-center gap-2 flex-wrap">
-                                {/* Remarks History button - only for HR admins */}
+                                {/* HR admin buttons */}
                                 {isHrAdmin && (
-                                    <Button
-                                        size="sm"
-                                        variant="outline"
-                                        onClick={openRemarksHistory}
-                                        className="gap-2"
-                                    >
-                                        <Clock className="w-4 h-4" />
-                                        View Remarks History
-                                    </Button>
+                                    <>
+                                        <Button
+                                            size="sm"
+                                            variant="outline"
+                                            onClick={openRemarksHistory}
+                                            className="gap-2"
+                                        >
+                                            <Clock className="w-4 h-4" />
+                                            View Remarks History
+                                        </Button>
+                                        <Button
+                                            size="sm"
+                                            variant="outline"
+                                            onClick={() => {
+                                                const params = new URLSearchParams({ date_start: dateStart, date_end: dateEnd });
+                                                window.location.href = route("workschedule.export") + "?" + params.toString();
+                                            }}
+                                            className="gap-2"
+                                        >
+                                            <Download className="w-4 h-4" />
+                                            Export
+                                        </Button>
+                                        <Button
+                                            size="sm"
+                                            variant="outline"
+                                            onClick={() => {
+                                                const params = new URLSearchParams({ date_start: dateStart, date_end: dateEnd });
+                                                window.location.href = route("workschedule.export-ot") + "?" + params.toString();
+                                            }}
+                                            className="gap-2"
+                                        >
+                                            <Download className="w-4 h-4" />
+                                            OT Export
+                                        </Button>
+                                    </>
                                 )}
 
                                 {canAcknowledge && (

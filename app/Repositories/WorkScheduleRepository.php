@@ -587,4 +587,32 @@ class WorkScheduleRepository
             }])
             ->get();
     }
+
+    /**
+     * All schedules with their days and shift codes for a cutoff (used by export).
+     */
+    public function getAllSchedulesWithDaysForExport(string $dateStart, string $dateEnd): Collection
+    {
+        return WorkSchedule::where('payroll_date_start', $dateStart)
+            ->where('payroll_date_end', $dateEnd)
+            ->with(['days.shiftCode'])
+            ->orderBy('emp_id')
+            ->get();
+    }
+
+    /**
+     * Approved/Acknowledged schedules with OT-eligible days for OT export.
+     */
+    public function getApprovedSchedulesWithOtDays(string $dateStart, string $dateEnd): Collection
+    {
+        return WorkSchedule::where('payroll_date_start', $dateStart)
+            ->where('payroll_date_end', $dateEnd)
+            ->whereIn('work_sched_status', [
+                WorkSchedule::STATUS_APPROVED,
+                WorkSchedule::STATUS_ACKNOWLEDGED,
+            ])
+            ->with(['days.shiftCode'])
+            ->orderBy('emp_id')
+            ->get();
+    }
 }
