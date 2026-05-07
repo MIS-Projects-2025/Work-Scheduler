@@ -226,7 +226,7 @@ export default function ScheduleTableViewing({
                                                     : "0 2px 0 0 hsl(var(--border))",
                                                 backgroundColor: holiday
                                                     ? holiday.color
-                                                    : undefined,
+                                                    : "hsl(var(--muted))",
                                                 color: holiday
                                                     ? contrastTextColor(holiday.color)
                                                     : undefined,
@@ -275,8 +275,8 @@ export default function ScheduleTableViewing({
                                                             ? "2px 0 4px -2px hsl(var(--border))"
                                                             : undefined,
                                                     backgroundColor: holiday
-                                                        ? holiday.color + "CC"  // slight transparency
-                                                        : undefined,
+                                                        ? holiday.color + "CC"
+                                                        : "hsl(var(--muted))",
                                                     color: holiday
                                                         ? contrastTextColor(holiday.color)
                                                         : undefined,
@@ -360,7 +360,6 @@ export default function ScheduleTableViewing({
                                                     isShiftCode && "cursor-help",
                                                     edited && "bg-yellow-50 dark:bg-yellow-950/20",
                                                 )}
-                                                title={holiday && !displayValue ? `${holiday.name} (${holiday.type})` : undefined}
                                                 style={{
                                                     ...(hasStyle && !sticky && !edited
                                                         ? {
@@ -407,10 +406,10 @@ export default function ScheduleTableViewing({
                                                         : editable
                                                           ? "Double-click to edit"
                                                           : isShiftCode
-                                                            ? getShiftDesc(
-                                                                  displayValue,
-                                                              )
-                                                            : undefined
+                                                            ? getShiftDesc(displayValue)
+                                                            : holiday && !displayValue
+                                                              ? `${holiday.name} (${holiday.type})`
+                                                              : undefined
                                                 }
                                             >
                                                 {renderCell(

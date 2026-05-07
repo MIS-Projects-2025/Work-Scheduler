@@ -30,6 +30,8 @@ export function useWorkSchedule({
     const [editedCells, setEditedCells] = useState(new Set());
     const [validationErrors, setValidationErrors] = useState([]);
 
+    const [holidays, setHolidays] = useState([]);
+
     const [resultModalOpen, setResultModalOpen] = useState(false);
     const [submitResult, setSubmitResult] = useState(null);
     const [isSubmitting, setIsSubmitting] = useState(false);
@@ -60,6 +62,7 @@ export function useWorkSchedule({
         // Reset selected cutoff when cutoff options change
         setSelectedCutoff("");
         setSelectedCutoffData(null);
+        setHolidays([]);
         // Reset the first selection flag when cutoff options change
         isFirstCutoffSelection.current = true;
     }, [cutoffOptions]);
@@ -67,11 +70,27 @@ export function useWorkSchedule({
     // Add a ref to track if it's the first cutoff selection
     const isFirstCutoffSelection = useRef(true);
 
+    const fetchHolidaysForCutoff = async (cutoffId) => {
+        if (!cutoffId) return;
+        try {
+            const res = await fetch(
+                route("workschedule.cutoff-days") + "?cutoff_id=" + cutoffId,
+                { headers: { Accept: "application/json" } },
+            );
+            if (!res.ok) return;
+            const json = await res.json();
+            setHolidays(json.holidays ?? []);
+        } catch {
+            setHolidays([]);
+        }
+    };
+
     const handleCutoffChange = (value) => {
         const newCutoffData = cutoffOptions.find((opt) => opt.value === value);
 
         setSelectedCutoff(value);
         setSelectedCutoffData(newCutoffData);
+        fetchHolidaysForCutoff(value);
 
         // Only reset and show message if this is NOT the first selection
         if (!isFirstCutoffSelection.current) {
@@ -471,6 +490,7 @@ export function useWorkSchedule({
         shiftOptions,
         cutoffOptions,
         hasData: employeeData.length > 0,
+        holidays,
         // handlers
         handleCutoffChange,
         handleFileChange,

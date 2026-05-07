@@ -203,7 +203,16 @@ class WorkScheduleController extends Controller
             $cur    = strtotime('+1 day', $cur);
         }
 
-        return response()->json(['cutoff' => $cutoff, 'days' => $days]);
+        $holidayItems = $this->service->getHolidaysForPeriod(
+            $cutoff->payroll_date_start,
+            $cutoff->payroll_date_end
+        );
+
+        return response()->json([
+            'cutoff'   => $cutoff,
+            'days'     => $days,
+            'holidays' => $holidayItems,
+        ]);
     }
 
     public function saveEdits(Request $request)

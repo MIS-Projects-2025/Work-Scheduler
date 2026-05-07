@@ -85,6 +85,7 @@ export default function WorkScheduleTemplate({
         shiftOptions,
         cutoffOptions,
         hasData,
+        holidays,
         handleCutoffChange,
         handleFileChange,
         handleCellEdit,
@@ -220,6 +221,8 @@ export default function WorkScheduleTemplate({
                                     editable={true}
                                     onCellChange={handleCellEdit}
                                     editedCells={editedCells}
+                                    holidays={holidays}
+                                    dateStart={selectedCutoffData?.start ?? null}
                                 />
                                 <div className="flex justify-end gap-3">
                                     <Button

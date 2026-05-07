@@ -22,6 +22,24 @@ class WorkScheduleService
     // Shared helpers
     // -------------------------------------------------------------------------
 
+    /**
+     * Holidays for a date range, normalised to the format the frontend expects.
+     */
+    public function getHolidaysForPeriod(string $dateStart, string $dateEnd): array
+    {
+        return $this->repo->getHolidaysForPeriod($dateStart, $dateEnd)
+            ->map(fn($h) => [
+                'date'  => $h->holiday_date instanceof \Carbon\Carbon
+                    ? $h->holiday_date->format('Y-m-d')
+                    : (string) $h->holiday_date,
+                'name'  => $h->holiday_name,
+                'type'  => $h->holiday_type,
+                'color' => $h->color ?? '#FF5733',
+            ])
+            ->values()
+            ->all();
+    }
+
     public function getShiftCodesForManager(?string $prodLine): Collection
     {
         return $this->repo->getFilteredShiftCodes($prodLine);

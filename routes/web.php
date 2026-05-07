@@ -20,6 +20,11 @@ require __DIR__ . '/admin.php';
 
 Route::get("/demo", [DemoController::class, 'index'])->name('demo');
 
+// API routes — loaded before fallback so they are matched first
+Route::prefix('api')->group(function () {
+    require __DIR__ . '/api.php';
+});
+
 Route::fallback(function () {
     return Inertia::render('404');
 })->name('404');
