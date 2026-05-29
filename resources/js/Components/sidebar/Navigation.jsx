@@ -1,6 +1,6 @@
 import { usePage } from "@inertiajs/react";
 import SidebarLink from "@/Components/sidebar/SidebarLink";
-import Dropdown from "@/Components/sidebar/Dropdown";
+import Dropdown from "@/Components/sidebar/DropDown";
 import {
     LayoutDashboard,
     FileSpreadsheet,
