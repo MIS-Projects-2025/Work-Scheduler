@@ -1,7 +1,7 @@
 import { router } from "@inertiajs/react";
 import { Separator } from "@/components/ui/separator";
 import { Button } from "@/components/ui/button";
-import { Badge } from "@/components/ui/badge";
+import { Badge } from "@/Components/ui/badge";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Combobox } from "@/components/ui/combobox";
 import {

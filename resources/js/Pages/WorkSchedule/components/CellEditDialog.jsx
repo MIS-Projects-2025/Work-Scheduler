@@ -8,7 +8,7 @@ import {
 } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
-import { Badge } from "@/components/ui/badge";
+import { Badge } from "@/Components/ui/badge";
 import { Combobox } from "@/components/ui/combobox";
 
 /**
