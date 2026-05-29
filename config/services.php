@@ -42,4 +42,8 @@ return [
     'internal' => [
         'key' => env('INTERNAL_API_KEY'),
     ],
+
+    'authify' => [
+        'base_url' => env('AUTHIFY_BASE_URL'),
+    ],
 ];
